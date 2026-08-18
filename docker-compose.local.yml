@@ -1,0 +1,36 @@
+# Local development dependencies only. Service names and ports here are never a
+# deployment contract and must never become an implicit fallback endpoint
+# (requirements 2.6, 2.11).
+name: mlsc-local
+
+services:
+  postgres:
+    # PostgreSQL 16.14 with TimescaleDB 2.29.1 and pgvector. Pinned by digest
+    # because the mutable pg16 tag moves with every Timescale release.
+    image: timescale/timescaledb-ha:pg16@sha256:df8eaa04de65fbe238df8dbc356e79108bcb8166d3458833536a3ff745abb2be
+    environment:
+      POSTGRES_DB: mlsc
+      POSTGRES_USER: mlsc
+      POSTGRES_PASSWORD: mlsc
+    ports:
+      - "55433:5432"
+    volumes:
+      - postgres-data:/home/postgres/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlsc -d mlsc"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:8.2-alpine
+    ports:
+      - "56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  postgres-data:

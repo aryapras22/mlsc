@@ -1,0 +1,18 @@
+name: mlsc
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.14.6
+  - fastapi=0.141.1
+  - uvicorn=0.52.3
+  - sqlalchemy=2.0.52
+  - alembic=1.19.1
+  - asyncpg=0.31.0
+  - pydantic=2.13.4
+  - pydantic-settings=2.15.0
+  - celery=5.6.3
+  - redis-py=8.1.0
+  - pgvector-python=0.5.0
+  - croniter=6.2.4
+  - pytest=9.1.1

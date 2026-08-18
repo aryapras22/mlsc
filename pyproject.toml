@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# Runtime and development dependencies are declared exclusively in
+# environment.yml (requirement 1.5); listing them here would create a second
+# source of truth.
+[project]
+name = "mlsc"
+version = "0.1.0"
+description = "Multi-source listening and signal foundation"
+requires-python = ">=3.14"
+
+[tool.setuptools.packages.find]
+include = ["mlsc*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--strict-markers --strict-config"
