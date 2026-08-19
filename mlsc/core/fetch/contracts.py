@@ -54,6 +54,13 @@ class FetchExpectations:
     required_fields: tuple[str, ...] = ()
     min_rows_when_healthy: int = 0
     body_format: Literal["json", "google_batchexecute"] = "json"
+    count_path: tuple[str | int, ...] | None = None
+    """Where to find the list checked against ``min_rows_when_healthy``, if not
+    ``item_path``. Google Play's continuation token lives alongside the review
+    list in the same decoded structure, so that adapter sets ``item_path=()``
+    to get the whole structure back and ``count_path=(0,)`` to point the
+    emptiness check at the review list nested inside it.
+    """
 
 
 @dataclass(frozen=True)

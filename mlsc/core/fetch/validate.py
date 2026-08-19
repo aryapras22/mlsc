@@ -31,10 +31,13 @@ def validate(
     """
     _check_content_type(content_type, expectations)
     decoded = _decode_body(body, expectations)
-    items = _walk_item_path(decoded, expectations)
+    items = _walk_path(decoded, expectations.item_path)
+    count_target = (
+        items if expectations.count_path is None else _walk_path(decoded, expectations.count_path)
+    )
     if expectations.body_format == "json":
         _check_required_fields(items, expectations)
-    _check_row_count_floor(items, expectations)
+    _check_row_count_floor(count_target, expectations)
     return items
 
 
@@ -82,9 +85,9 @@ def _check_content_type(content_type: str, expectations: FetchExpectations) -> N
         raise UnexpectedContentType(expected=expected, actual=actual)
 
 
-def _walk_item_path(body: Any, expectations: FetchExpectations) -> list[Any]:
+def _walk_path(body: Any, path: tuple[str | int, ...]) -> list[Any]:
     current = body
-    for key in expectations.item_path:
+    for key in path:
         if isinstance(key, int):
             if not isinstance(current, list) or not (-len(current) <= key < len(current)):
                 raise MissingRequiredFields(missing=(str(key),))
@@ -94,9 +97,7 @@ def _walk_item_path(body: Any, expectations: FetchExpectations) -> list[Any]:
                 raise MissingRequiredFields(missing=(key,))
             current = current[key]
     if not isinstance(current, list):
-        raise MissingRequiredFields(
-            missing=tuple(str(k) for k in expectations.item_path) or ("<root>",)
-        )
+        raise MissingRequiredFields(missing=tuple(str(k) for k in path) or ("<root>",))
     return current
 
 
