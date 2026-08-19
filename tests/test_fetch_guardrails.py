@@ -182,6 +182,58 @@ class TestValidator:
         assert items == [{"id": "1"}, {"id": "2"}]
 
 
+def batchexecute_body(inner_payload: Any) -> bytes:
+    import json as _json
+
+    inner = _json.dumps(inner_payload)
+    outer = _json.dumps([["wrb.fr", "oCPfdb", inner]])
+    return b")]}'\n\n" + outer.encode()
+
+
+class TestGoogleBatchexecuteFormat:
+    def test_unwraps_the_envelope_and_returns_the_inner_list(self) -> None:
+        body = batchexecute_body([[["id-1"], ["id-2"]]])
+        expectations = FetchExpectations(
+            content_type="application/json", item_path=(0,), body_format="google_batchexecute"
+        )
+
+        items = validate(content_type="application/json", body=body, expectations=expectations)
+
+        assert items == [["id-1"], ["id-2"]]
+
+    def test_empty_inner_list_is_illegitimately_empty(self) -> None:
+        body = batchexecute_body([[]])
+        expectations = FetchExpectations(
+            content_type="application/json",
+            item_path=(0,),
+            min_rows_when_healthy=1,
+            body_format="google_batchexecute",
+        )
+
+        with pytest.raises(IllegitimatelyEmpty):
+            validate(content_type="application/json", body=body, expectations=expectations)
+
+    def test_missing_xssi_prefix_and_garbage_body_is_reported(self) -> None:
+        expectations = FetchExpectations(
+            content_type="application/json", item_path=(0,), body_format="google_batchexecute"
+        )
+
+        with pytest.raises(MissingRequiredFields):
+            validate(
+                content_type="application/json",
+                body=b"not the expected envelope at all",
+                expectations=expectations,
+            )
+
+    def test_wrong_content_type_is_still_checked_first(self) -> None:
+        expectations = FetchExpectations(
+            content_type="application/json", item_path=(0,), body_format="google_batchexecute"
+        )
+
+        with pytest.raises(UnexpectedContentType):
+            validate(content_type="text/html", body=b"<html/>", expectations=expectations)
+
+
 class TestThrottle:
     def test_spaces_requests_by_refill_rate_under_a_frozen_clock(self) -> None:
         redis = FakeRedis()

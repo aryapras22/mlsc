@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 
 class ClientProfile(Enum):
@@ -39,12 +39,21 @@ class FetchExpectations:
     ``item_path`` is the sequence of keys/indices to walk from the parsed body to
     the list of items, e.g. ``("data", "items")``. An empty tuple means the body
     itself is the item list.
+
+    ``body_format`` selects how the raw body is decoded before ``item_path`` is
+    walked. ``"json"`` is a plain JSON document. ``"google_batchexecute"`` is
+    Google's RPC envelope — a ``)]}'`` XSSI prefix followed by a JSON array whose
+    third element is itself a JSON-encoded string carrying the real payload.
+    Google Play's review endpoint uses this format; nothing else needs it yet.
+    Required-field checking does not apply to this format because its items are
+    positional arrays, not objects with named keys.
     """
 
     content_type: str
-    item_path: tuple[str, ...] = ()
+    item_path: tuple[str | int, ...] = ()
     required_fields: tuple[str, ...] = ()
     min_rows_when_healthy: int = 0
+    body_format: Literal["json", "google_batchexecute"] = "json"
 
 
 @dataclass(frozen=True)
