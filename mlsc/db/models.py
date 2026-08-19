@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 
 from sqlalchemy import DateTime, ForeignKey, MetaData, UniqueConstraint
@@ -83,3 +83,159 @@ class ScheduleRegistration(Base):
     timezone: Mapped[str]
 
     monitor: Mapped[Monitor] = relationship(back_populates="registration")
+
+
+class SourceName(str, Enum):
+    """Which adapter a source row is collected by. Closed: only what is built."""
+
+    PLAY = "play"
+    APPSTORE = "appstore"
+    DISCOURSE = "discourse"
+    NEWS = "news"
+    RSS = "rss"
+    HACKERNEWS = "hackernews"
+
+
+class RunStatus(str, Enum):
+    """An ingestion run's lifecycle for one monitor on one date."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    PARTIAL = "partial"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class QuotaOutcome(str, Enum):
+    """Whether a run's daily allowance was reached.
+
+    A named variant rather than a boolean, so meaning travels with the value:
+    ``ALLOWANCE_REACHED`` means the paired count is a floor, not a measurement
+    (learn.md, "A fixed daily quota as a stable denominator").
+    """
+
+    WITHIN_ALLOWANCE = "within_allowance"
+    ALLOWANCE_REACHED = "allowance_reached"
+
+
+class MonitorSource(Base):
+    """One concrete source attached to a monitor: what to collect, and from where.
+
+    ``instance_key`` is the source's own identifier for what it watches — a Play
+    package id, a Discourse base URL — extracted from ``config`` at attach time
+    so uniqueness does not depend on comparing JSONB contents.
+    """
+
+    __tablename__ = "monitor_sources"
+    __table_args__ = (
+        UniqueConstraint(
+            "monitor_id", "source_name", "instance_key", name="uq_monitor_sources_identity"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    source_name: Mapped[SourceName]
+    instance_key: Mapped[str]
+    config: Mapped[dict] = mapped_column(JSONB)
+    daily_quota: Mapped[int]
+    enabled: Mapped[bool] = mapped_column(default=True)
+    last_external_id: Mapped[str | None]
+    last_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class IngestionRun(Base):
+    """One run of collection for one monitor on one date.
+
+    Unique per monitor, date, and backfill mode so a scheduled run and a
+    deliberate backfill for the same day can coexist without colliding.
+    """
+
+    __tablename__ = "ingestion_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "monitor_id", "run_date", "is_backfill", name="uq_ingestion_runs_identity"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    run_date: Mapped[date]
+    is_backfill: Mapped[bool] = mapped_column(default=False)
+    status: Mapped[RunStatus] = mapped_column(default=RunStatus.PENDING)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class FetchStats(Base):
+    """One source's outcome for one run. Written even when nothing was collected.
+
+    A record in its own right rather than columns on the run: a run has one row
+    per source, and the row must exist whether the source succeeded, was
+    truncated, or failed outright (design.md, "Domain shapes").
+    """
+
+    __tablename__ = "fetch_stats"
+    __table_args__ = (
+        UniqueConstraint("run_id", "monitor_source_id", name="uq_fetch_stats_run_source"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("ingestion_runs.id", ondelete="CASCADE"))
+    monitor_source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitor_sources.id", ondelete="CASCADE")
+    )
+    attempted: Mapped[int] = mapped_column(default=0)
+    fetched: Mapped[int] = mapped_column(default=0)
+    duplicates: Mapped[int] = mapped_column(default=0)
+    kept: Mapped[int] = mapped_column(default=0)
+    quota: Mapped[int]
+    quota_outcome: Mapped[QuotaOutcome] = mapped_column(default=QuotaOutcome.WITHIN_ALLOWANCE)
+    validation_failed: Mapped[bool] = mapped_column(default=False)
+    library_version: Mapped[str]
+    duration_seconds: Mapped[float] = mapped_column(default=0.0)
+    error: Mapped[str | None]
+
+
+class Document(Base):
+    """One collected item. Author identity is a hash; nothing else identifies who wrote it.
+
+    Unique on ``(monitor_id, source_name, external_id)``: the natural key that
+    makes re-running collection for the same day idempotent at the database
+    level rather than by an application-side existence check (learn.md,
+    "Idempotency by natural key").
+    """
+
+    __tablename__ = "documents"
+    __table_args__ = (
+        UniqueConstraint(
+            "monitor_id", "source_name", "external_id", name="uq_documents_natural_key"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    source_name: Mapped[SourceName]
+    external_id: Mapped[str]
+    entity_id: Mapped[str]
+    url: Mapped[str | None]
+    author_hash: Mapped[str]
+    body: Mapped[str | None]
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    rating: Mapped[int | None]
+    app_version: Mapped[str | None]
+    engagement: Mapped[int | None]
+    content_hash: Mapped[str]
+    raw: Mapped[dict] = mapped_column(JSONB)
