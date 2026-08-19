@@ -377,3 +377,95 @@ class TestFetchClientBreakerIntegration:
 
         assert outcome.status is FetchStatus.OK
         assert transport.calls == 2
+
+
+class TestFetchClientLiveSource:
+    """Exercises the client against a real benign source: Hacker News via Algolia.
+
+    Skipped when the network is unavailable rather than failing the suite —
+    fetch-guardrails requirement 1, 3, 6, 8.
+    """
+
+    HN_URL = "https://hn.algolia.com/api/v1/search"
+
+    def _build_live_client(self) -> FetchClient:
+        import httpx
+
+        redis = FakeRedis()
+        clock = FrozenClock()
+        throttle = Throttle(redis, clock=clock, random_source=FixedRandom(0.0))
+        breaker = Breaker(redis, BreakerSettings(failure_threshold=3, cooldown_seconds=30.0), clock=clock)
+        cache = ResponseCache(redis, ttl_seconds=3600)
+        budget = HostBudget(
+            capacity=5.0, refill_rate_per_second=5.0, jitter_low_seconds=0.0, jitter_high_seconds=0.0
+        )
+        from mlsc.core.fetch.transports import PlainTransport
+
+        plain = PlainTransport(httpx.AsyncClient())
+        return FetchClient(
+            breaker=breaker,
+            cache=cache,
+            throttle=throttle,
+            plain_transport=plain,
+            impersonating_transport=plain,
+            host_budget=budget,
+        )
+
+    def test_live_fetch_validates_and_repeat_is_cached(self) -> None:
+        pytest.importorskip("httpx")
+        import httpx
+
+        try:
+            httpx.get(self.HN_URL, params={"query": "test", "tags": "story"}, timeout=5.0)
+        except httpx.HTTPError:
+            pytest.skip("network unavailable")
+
+        client = self._build_live_client()
+        req = FetchRequest(
+            url=self.HN_URL,
+            host_key="hn.algolia.com",
+            client_profile=ClientProfile.PLAIN,
+            query=(("query", "test"), ("tags", "story")),
+        )
+        live_expectations = FetchExpectations(
+            content_type="application/json",
+            item_path=("hits",),
+            required_fields=("objectID", "created_at"),
+            min_rows_when_healthy=1,
+        )
+
+        first = asyncio.run(client.get(req, live_expectations))
+        second = asyncio.run(client.get(req, live_expectations))
+
+        assert first.status is FetchStatus.OK
+        assert not first.served_from_cache
+        assert second.status is FetchStatus.OK
+        assert second.served_from_cache
+
+    def test_wrong_expectation_fails_loudly(self) -> None:
+        pytest.importorskip("httpx")
+        import httpx
+
+        try:
+            httpx.get(self.HN_URL, params={"query": "test", "tags": "story"}, timeout=5.0)
+        except httpx.HTTPError:
+            pytest.skip("network unavailable")
+
+        client = self._build_live_client()
+        req = FetchRequest(
+            url=self.HN_URL,
+            host_key="hn.algolia.com",
+            client_profile=ClientProfile.PLAIN,
+            query=(("query", "test"), ("tags", "story")),
+            collection_window="wrong-expectation-case",
+        )
+        wrong_expectations = FetchExpectations(
+            content_type="application/json",
+            item_path=("hits",),
+            required_fields=("this_field_does_not_exist",),
+        )
+
+        outcome = asyncio.run(client.get(req, wrong_expectations))
+
+        assert outcome.status is FetchStatus.VALIDATION_FAILED
+        assert isinstance(outcome.payload, MissingRequiredFields)
