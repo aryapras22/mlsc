@@ -51,6 +51,8 @@ class Monitor(Base):
     name: Mapped[str]
     target_type: Mapped[TargetType]
     seed: Mapped[dict] = mapped_column(JSONB)
+    schedule: Mapped[str]
+    timezone: Mapped[str]
     status: Mapped[MonitorStatus] = mapped_column(default=MonitorStatus.ACTIVE)
     retention_days: Mapped[int]
     created_at: Mapped[datetime] = mapped_column(

@@ -1,8 +1,8 @@
 """create monitors and schedule registrations
 
-Revision ID: bb7bcdc81dac
+Revision ID: 131f6c8e5ead
 Revises: 
-Create Date: 2026-08-19 12:06:40.231340+00:00
+Create Date: 2026-08-19 12:51:55.038921+00:00
 
 """
 
@@ -14,7 +14,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision: str = 'bb7bcdc81dac'
+revision: str = '131f6c8e5ead'
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -27,6 +27,8 @@ def upgrade() -> None:
     sa.Column('name', sa.String(), nullable=False),
     sa.Column('target_type', sa.Enum('PRODUCT', 'THEME', name='targettype'), nullable=False),
     sa.Column('seed', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('schedule', sa.String(), nullable=False),
+    sa.Column('timezone', sa.String(), nullable=False),
     sa.Column('status', sa.Enum('ACTIVE', 'PAUSED', 'ARCHIVED', name='monitorstatus'), nullable=False),
     sa.Column('retention_days', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
