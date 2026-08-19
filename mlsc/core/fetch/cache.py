@@ -74,6 +74,7 @@ class ResponseCache:
                     "url": request.url,
                     "method": request.method,
                     "query": request.query,
+                    "body": request.body.hex() if request.body else None,
                     "collection_window": request.collection_window,
                 },
                 sort_keys=True,

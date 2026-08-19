@@ -41,6 +41,7 @@ class PlainTransport:
                 request.url,
                 params=list(request.query),
                 headers=dict(request.headers),
+                content=request.body,
             )
         except httpx.HTTPError as error:
             raise TransportFailure(host_key=request.host_key, cause=error) from error
@@ -66,6 +67,7 @@ class ImpersonatingTransport:
                 request.url,
                 params=list(request.query),
                 headers=dict(request.headers),
+                data=request.body,
                 impersonate=self._impersonate,
             )
         except curl_cffi.CurlError as error:

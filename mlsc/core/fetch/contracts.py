@@ -58,7 +58,11 @@ class FetchExpectations:
 
 @dataclass(frozen=True)
 class FetchRequest:
-    """One request. Identical requests within a collection window share a cache entry."""
+    """One request. Identical requests within a collection window share a cache entry.
+
+    ``body`` is for POST requests whose payload is not query parameters, such as
+    Google Play's review RPC, which POSTs a form-encoded ``f.req=...`` body.
+    """
 
     url: str
     host_key: str
@@ -66,6 +70,7 @@ class FetchRequest:
     method: str = "GET"
     query: tuple[tuple[str, str], ...] = ()
     headers: tuple[tuple[str, str], ...] = ()
+    body: bytes | None = None
     collection_window: str = ""
 
 
