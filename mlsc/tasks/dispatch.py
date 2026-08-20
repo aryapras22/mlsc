@@ -14,6 +14,7 @@ from mlsc.application.runs import RunService, SourceOutcome, SourceResult
 from mlsc.core.fetch.client import FetchClient
 from mlsc.db.models import SourceName
 from mlsc.tasks.ingest import SourceDisabled, collect_play_reviews
+from mlsc.tasks.maintenance import evaluate_source_health
 
 
 async def dispatch_run(
@@ -31,6 +32,7 @@ async def dispatch_run(
         outcomes.append(await _collect_one(session_factory, fetch_client, run_id, source))
 
     await run_service.finalise(run_id, outcomes, expected_volume=bool(sources))
+    await evaluate_source_health(session_factory, run_id)
 
 
 async def _collect_one(session_factory, fetch_client, run_id, source) -> SourceOutcome:  # noqa: ANN001

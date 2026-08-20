@@ -106,6 +106,15 @@ class RunStatus(str, Enum):
     FAILED = "failed"
 
 
+class FetchOutcomeKind(str, Enum):
+    """What actually happened for one source in one run. Distinguishing
+    ``skipped_disabled`` from a genuine zero is what requirement 4 needs."""
+
+    COLLECTED = "collected"
+    FAILED = "failed"
+    SKIPPED_DISABLED = "skipped_disabled"
+
+
 class QuotaOutcome(str, Enum):
     """Whether a run's daily allowance was reached.
 
@@ -200,9 +209,93 @@ class FetchStats(Base):
     quota: Mapped[int]
     quota_outcome: Mapped[QuotaOutcome] = mapped_column(default=QuotaOutcome.WITHIN_ALLOWANCE)
     validation_failed: Mapped[bool] = mapped_column(default=False)
+    outcome_kind: Mapped[FetchOutcomeKind] = mapped_column(default=FetchOutcomeKind.COLLECTED)
     library_version: Mapped[str]
     duration_seconds: Mapped[float] = mapped_column(default=0.0)
     error: Mapped[str | None]
+
+
+class SourceState(str, Enum):
+    """A source's health. Distinct from ``MonitorSource.enabled``, which is the
+    user's own switch; this is the system's computed verdict."""
+
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    BROKEN = "broken"
+    DISABLED = "disabled"
+
+
+class AlertKind(str, Enum):
+    EMPTY_STREAK = "empty_streak"
+    VOLUME_COLLAPSE = "volume_collapse"
+    SMOKE_FAILED = "smoke_failed"
+    LIBRARY_STALE = "library_stale"
+
+
+class SourceHealth(Base):
+    """One row per monitor source: the latest computed verdict, not a history."""
+
+    __tablename__ = "source_health"
+    __table_args__ = (
+        UniqueConstraint("monitor_source_id", name="uq_source_health_monitor_source_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitor_sources.id", ondelete="CASCADE")
+    )
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consecutive_empty: Mapped[int] = mapped_column(default=0)
+    consecutive_fail: Mapped[int] = mapped_column(default=0)
+    rows_median_28d: Mapped[float | None]
+    library_version: Mapped[str | None]
+    state: Mapped[SourceState] = mapped_column(default=SourceState.HEALTHY)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ScraperAlert(Base):
+    """Routed separately from product alerts (requirement 2) — its own table,
+    not a kind column shared with anything else."""
+
+    __tablename__ = "scraper_alerts"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("monitors.id", ondelete="CASCADE"))
+    monitor_source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitor_sources.id", ondelete="CASCADE")
+    )
+    kind: Mapped[AlertKind]
+    raised_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    observed: Mapped[str | None]
+    expected: Mapped[str | None]
+
+
+class BackfillStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class BackfillJob(Base):
+    """A one-shot wider-window collection. Never an IngestionRun row itself —
+    it fans out into one IngestionRun(is_backfill=True) per date, so the daily
+    series and its statistics are untouched (requirement 6, 7)."""
+
+    __tablename__ = "backfill_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("monitors.id", ondelete="CASCADE"))
+    window_start: Mapped[date]
+    window_end: Mapped[date]
+    status: Mapped[BackfillStatus] = mapped_column(default=BackfillStatus.PENDING)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class Document(Base):
