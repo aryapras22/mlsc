@@ -53,7 +53,11 @@ class FetchExpectations:
     item_path: tuple[str | int, ...] = ()
     required_fields: tuple[str, ...] = ()
     min_rows_when_healthy: int = 0
-    body_format: Literal["json", "google_batchexecute"] = "json"
+    body_format: Literal["json", "google_batchexecute", "raw"] = "json"
+    """``"raw"`` skips decoding entirely and returns the body as text — for feed
+    and article endpoints whose payload isn't JSON. ``item_path`` and
+    ``required_fields`` do not apply to this format; only the row-count floor
+    on ``min_rows_when_healthy=0`` (i.e. no floor) makes sense with it."""
     count_path: tuple[str | int, ...] | None = None
     """Where to find the list checked against ``min_rows_when_healthy``, if not
     ``item_path``. Google Play's continuation token lives alongside the review

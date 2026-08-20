@@ -21,3 +21,5 @@ dependencies:
       - httpx==0.28.1
       - curl_cffi==0.15.0
       - google-play-scraper==1.2.7
+      - feedparser==6.0.14
+      - trafilatura==2.2.0

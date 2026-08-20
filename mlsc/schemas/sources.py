@@ -29,20 +29,54 @@ def _validate_play_config(config: dict[str, Any]) -> str:
     return package_id
 
 
+def _validate_appstore_config(config: dict[str, Any]) -> str:
+    app_id = config.get("app_id")
+    if not isinstance(app_id, str) or not app_id.isdigit():
+        raise ValueError(f"config.app_id {app_id!r} is not a well-formed App Store numeric id")
+    return app_id
+
+
+def _validate_discourse_config(config: dict[str, Any]) -> str:
+    base_url = config.get("base_url")
+    if not isinstance(base_url, str) or not re.match(r"^https?://[^/]+/?$", base_url):
+        raise ValueError(f"config.base_url {base_url!r} is not a well-formed forum base URL")
+    return base_url.rstrip("/")
+
+
+def _validate_news_config(config: dict[str, Any]) -> str:
+    queries = config.get("queries")
+    if not isinstance(queries, list) or not queries or not all(isinstance(q, str) for q in queries):
+        raise ValueError("config.queries must be a non-empty list of strings")
+    return "|".join(queries)
+
+
+def _validate_feed_config(config: dict[str, Any]) -> str:
+    feed_url = config.get("feed_url")
+    if not isinstance(feed_url, str) or not re.match(r"^https?://", feed_url):
+        raise ValueError(f"config.feed_url {feed_url!r} is not a well-formed URL")
+    return feed_url
+
+
+def _validate_hackernews_config(config: dict[str, Any]) -> str:
+    queries = config.get("queries")
+    if not isinstance(queries, list) or not queries or not all(isinstance(q, str) for q in queries):
+        raise ValueError("config.queries must be a non-empty list of strings")
+    return "|".join(queries)
+
+
 _INSTANCE_KEY_VALIDATORS = {
     SourceName.PLAY: _validate_play_config,
+    SourceName.APPSTORE: _validate_appstore_config,
+    SourceName.DISCOURSE: _validate_discourse_config,
+    SourceName.NEWS: _validate_news_config,
+    SourceName.RSS: _validate_feed_config,
+    SourceName.HACKERNEWS: _validate_hackernews_config,
 }
 
 
 def instance_key_for(source_name: SourceName, config: dict[str, Any]) -> str:
-    """Validate ``config`` for ``source_name`` and return its instance key.
-
-    Only Play is implemented; other source names raise until their adapter and
-    validator arrive in ``multi-source-ingestion``.
-    """
-    validator = _INSTANCE_KEY_VALIDATORS.get(source_name)
-    if validator is None:
-        raise ValueError(f"source {source_name.value!r} is not yet implemented")
+    """Validate ``config`` for ``source_name`` and return its instance key."""
+    validator = _INSTANCE_KEY_VALIDATORS[source_name]
     return validator(config)
 
 

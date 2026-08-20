@@ -30,6 +30,8 @@ def validate(
     rather than a JSON decode error.
     """
     _check_content_type(content_type, expectations)
+    if expectations.body_format == "raw":
+        return body.decode("utf-8", errors="replace")
     decoded = _decode_body(body, expectations)
     items = _walk_path(decoded, expectations.item_path)
     count_target = (
