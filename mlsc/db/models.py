@@ -390,3 +390,128 @@ class Enrichment(Base):
     enriched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class TopicStatus(str, Enum):
+    """A topic's lifecycle. No ``deleted`` member — that is the point of C3."""
+
+    ACTIVE = "active"
+    DORMANT = "dormant"
+    MERGED = "merged"
+    ARCHIVED = "archived"
+
+
+class Topic(Base):
+    """A persistent theme. ``id`` is the one identifier that must outlive every
+    algorithm that produced it — merging and dormancy change ``status``, never
+    the primary key (design.md, "Domain shapes").
+    """
+
+    __tablename__ = "topics"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    label: Mapped[str]
+    keywords: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    centroid: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
+    doc_count: Mapped[int] = mapped_column(default=0)
+    first_seen: Mapped[date]
+    last_seen: Mapped[date]
+    status: Mapped[TopicStatus] = mapped_column(default=TopicStatus.ACTIVE)
+    merged_into: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("topics.id", ondelete="SET NULL")
+    )
+    drift_score: Mapped[float] = mapped_column(default=0.0)
+    is_pinned: Mapped[bool] = mapped_column(default=False)
+    label_is_provisional: Mapped[bool] = mapped_column(default=False)
+    label_provider: Mapped[str | None]
+    label_model: Mapped[str | None]
+    label_prompt_version: Mapped[str | None]
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AssignmentMethod(str, Enum):
+    """How a document arrived at its topic. What makes "never reassign a
+    manual assignment" a checkable condition rather than a convention."""
+
+    CENTROID = "centroid"
+    CLUSTERED = "clustered"
+    MANUAL = "manual"
+
+
+class Assignment(Base):
+    """One document, one topic. A second row for the same document replaces the
+    first rather than coexisting — prevalence must sum to one (design.md,
+    "Domain shapes").
+    """
+
+    __tablename__ = "assignments"
+    __table_args__ = (
+        UniqueConstraint("document_id", name="uq_assignments_document_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    )
+    topic_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), index=True
+    )
+    similarity: Mapped[float]
+    method: Mapped[AssignmentMethod]
+    assigned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class LineageEvent(str, Enum):
+    MERGE = "merge"
+    REFIT_REMAP = "refit_remap"
+    SPLIT_PROPOSED = "split_proposed"
+
+
+class Lineage(Base):
+    """A record of what happened to a topic identifier. Both ``from_topic`` and
+    ``to_topic`` stay resolvable after a merge (requirement 5)."""
+
+    __tablename__ = "lineage"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    from_topic: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), index=True
+    )
+    to_topic: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("topics.id", ondelete="SET NULL")
+    )
+    event: Mapped[LineageEvent]
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    reason: Mapped[str | None]
+
+
+class SplitProposalStatus(str, Enum):
+    OPEN = "open"
+    DISMISSED = "dismissed"
+
+
+class SplitProposal(Base):
+    """A recorded suggestion that a topic covers two things. Stored because it
+    is a user-facing artefact (requirement 8) — never auto-applied."""
+
+    __tablename__ = "split_proposals"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    topic_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), index=True
+    )
+    evidence: Mapped[str]
+    drift_score: Mapped[float]
+    status: Mapped[SplitProposalStatus] = mapped_column(default=SplitProposalStatus.OPEN)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

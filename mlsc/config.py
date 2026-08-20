@@ -118,6 +118,37 @@ class LlmTierSettings(BaseSettings):
     model: str
 
 
+class TopicThresholds(BaseSettings):
+    """Every similarity and agreement threshold `persistent-topics` needs.
+
+    Every value here is explicitly unresolved in the spec and will be
+    re-tuned against real data (design.md, "Dependencies, injected") — this
+    is one injected configuration value rather than scattered constants, so
+    retuning is an environment change, not a code change.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="MLSC_TOPICS_", frozen=True, extra="ignore")
+
+    assignment_threshold: float = Field(default=0.55, gt=0, lt=1)
+    merge_threshold: float = Field(default=0.75, gt=0, lt=1)
+    drift_factor: float = Field(default=0.02, gt=0, lt=1)
+    min_residue_pool_size: int = Field(default=30, ge=1)
+    min_cluster_size: int = Field(default=5, ge=2)
+    dormancy_days: int = Field(default=60, ge=1)
+    refit_agreement_threshold: float = Field(default=0.6, gt=0, le=1)
+    refit_window_days: int = Field(default=30, ge=1)
+    split_drift_threshold: float = Field(default=0.5, gt=0)
+
+    @model_validator(mode="after")
+    def _require_merge_above_assignment(self) -> TopicThresholds:
+        # A merge threshold at or below the assignment threshold would let
+        # discovery immediately re-absorb what assignment just decided was
+        # too dissimilar to join, collapsing the registry into one topic.
+        if self.merge_threshold <= self.assignment_threshold:
+            raise ValueError("merge_threshold must be greater than assignment_threshold")
+        return self
+
+
 @dataclass(frozen=True)
 class Settings:
     postgres: PostgresSettings
@@ -127,6 +158,12 @@ class Settings:
 def load_settings() -> Settings:
     """Validate every required setting from the process environment, without network access."""
     return Settings(postgres=_load(PostgresSettings), redis=_load(RedisSettings))
+
+
+def load_topic_thresholds() -> TopicThresholds:
+    """Validated at startup so a merge threshold below the assignment threshold
+    cannot start (requirement 1, 3, 7)."""
+    return _load(TopicThresholds)
 
 
 def load_llm_tier_settings(tier: str) -> LlmTierSettings:

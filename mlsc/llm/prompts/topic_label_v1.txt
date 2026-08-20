@@ -1,0 +1,16 @@
+You are naming a topic that groups similar user feedback documents.
+
+Below are the keywords most distinctive to this group of documents, ranked by
+distinctiveness, followed by a few example documents from the group.
+
+You must respond with exactly one JSON object with a single top-level key
+named "label". "label" must be a short, human-readable phrase (three to six
+words) naming what this group of documents is about. Do not add any other
+top-level key.
+
+Example shape: {{"label": "voice chat moderation"}}
+
+Keywords: {keywords}
+
+Examples:
+{examples}
