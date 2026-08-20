@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from mlsc.application.runs import RunService, SourceOutcome, SourceResult
 from mlsc.core.fetch.client import FetchClient
-from mlsc.db.models import SourceName
+from mlsc.db.models import RunStatus, SourceName
 from mlsc.tasks.ingest import SourceDisabled, collect_play_reviews
 from mlsc.tasks.maintenance import evaluate_source_health
 
@@ -31,8 +31,41 @@ async def dispatch_run(
     for source in sources:
         outcomes.append(await _collect_one(session_factory, fetch_client, run_id, source))
 
-    await run_service.finalise(run_id, outcomes, expected_volume=bool(sources))
+    status = await run_service.finalise(run_id, outcomes, expected_volume=bool(sources))
     await evaluate_source_health(session_factory, run_id)
+
+    if status in (RunStatus.COMPLETE, RunStatus.PARTIAL):
+        await _run_downstream_pipeline(session_factory, run_id=run_id, monitor_id=monitor_id)
+
+
+async def _run_downstream_pipeline(
+    session_factory: async_sessionmaker[AsyncSession], *, run_id: uuid.UUID, monitor_id: uuid.UUID
+) -> None:
+    """Enrichment, topic assignment, and the metrics rollup, in that order —
+    each stage's output is the next stage's input (design.md's "Success
+    path" for `document-enrichment`, `persistent-topics`, and
+    `daily-topic-metrics` respectively). A stage failing here does not
+    revisit run classification: the run itself already collected
+    successfully, and a downstream failure is retried by re-running this
+    pipeline rather than by re-collecting.
+    """
+    from mlsc.db.models import IngestionRun
+    from mlsc.pipeline.enrich import Embedder, SentimentScorer
+    from mlsc.tasks.analytics import run_daily_analytics
+    from mlsc.tasks.enrich import ALL_STAGES, enrich_documents
+
+    async with session_factory() as session:
+        run = await session.get(IngestionRun, run_id)
+        run_date = run.run_date
+
+    await enrich_documents(
+        session_factory,
+        monitor_id=monitor_id,
+        stages=ALL_STAGES,
+        embedder=Embedder(),
+        sentiment_scorer=SentimentScorer(),
+    )
+    await run_daily_analytics(session_factory, monitor_id=monitor_id, run_date=run_date)
 
 
 async def _collect_one(session_factory, fetch_client, run_id, source) -> SourceOutcome:  # noqa: ANN001

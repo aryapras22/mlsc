@@ -5,7 +5,7 @@ from datetime import date, datetime
 from enum import Enum
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, MetaData, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, MetaData, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -514,4 +514,79 @@ class SplitProposal(Base):
     status: Mapped[SplitProposalStatus] = mapped_column(default=SplitProposalStatus.OPEN)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class RollupReason(str, Enum):
+    """Why a bucket was (re)computed. A scheduled run and a late-arrival
+    recompute produce the same numbers by a different path, and knowing
+    which is what makes requirement 6 debuggable (design.md, "Domain
+    shapes")."""
+
+    SCHEDULED = "scheduled"
+    LATE_ARRIVAL = "late_arrival"
+    TOPIC_MERGE = "topic_merge"
+    MANUAL = "manual"
+
+
+class DailyMetric(Base):
+    """One breakdown's figures for one monitor and one bucket.
+
+    ``source_name`` and ``topic_id`` are each nullable, meaning "every
+    source" or "every topic" — the across-source and across-topic aggregates
+    are ordinary rows with an all-value rather than a separate table
+    (design.md, "Domain shapes": ``MetricKey``). Uniqueness over the nullable
+    pair is enforced by four migration-owned partial indexes rather than a
+    plain unique constraint, because SQL treats two NULLs as distinct and
+    would otherwise let duplicate all-value rows accumulate silently.
+    """
+
+    __tablename__ = "daily_metrics"
+    __table_args__ = (
+        Index("ix_daily_metrics_monitor_bucket", "monitor_id", "bucket"),
+        Index(
+            "uq_daily_metrics_key_both", "monitor_id", "bucket", "source_name", "topic_id",
+            unique=True,
+            postgresql_where="source_name IS NOT NULL AND topic_id IS NOT NULL",
+        ),
+        Index(
+            "uq_daily_metrics_key_source_only", "monitor_id", "bucket", "source_name",
+            unique=True,
+            postgresql_where="source_name IS NOT NULL AND topic_id IS NULL",
+        ),
+        Index(
+            "uq_daily_metrics_key_topic_only", "monitor_id", "bucket", "topic_id",
+            unique=True,
+            postgresql_where="source_name IS NULL AND topic_id IS NOT NULL",
+        ),
+        Index(
+            "uq_daily_metrics_key_neither", "monitor_id", "bucket",
+            unique=True,
+            postgresql_where="source_name IS NULL AND topic_id IS NULL",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    bucket: Mapped[date] = mapped_column(index=True)
+    source_name: Mapped[SourceName | None]
+    topic_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("topics.id", ondelete="SET NULL"), index=True
+    )
+    doc_count: Mapped[int]
+    doc_count_share: Mapped[float]
+    sample_size: Mapped[int]
+    quota_hit: Mapped[bool] = mapped_column(default=False)
+    sentiment_mean: Mapped[float | None]
+    sentiment_p25: Mapped[float | None]
+    negativity_rate: Mapped[float | None]
+    engagement_sum: Mapped[int | None]
+    author_diversity: Mapped[float | None]
+    rating_mean: Mapped[float | None]
+    intent_counts: Mapped[dict] = mapped_column(JSONB, default=dict)
+    reason: Mapped[RollupReason]
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
