@@ -1,0 +1,14 @@
+Classify the intent of each document below. For each, return one of:
+feature_request, bug_report, praise, complaint, question, churn_signal,
+pricing, competitor_mention, spam.
+
+You must respond with exactly one JSON object with a single top-level key
+named "results". "results" must be a JSON array with exactly one entry per
+document listed below, in the same order. Each entry is an object with keys
+"document_id", "intent", and "confidence". Do not add any other top-level
+key. Do not omit "results".
+
+Example shape: {{"results": [{{"document_id": "abc", "intent": "praise", "confidence": 0.9}}]}}
+
+Documents:
+{documents}

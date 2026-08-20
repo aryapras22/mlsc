@@ -103,6 +103,21 @@ class RedisSettings(BaseSettings):
         return f"{scheme}://{self.host}:{self.port}/{self.database}"
 
 
+class LlmTierSettings(BaseSettings):
+    """One tier's provider endpoint and model, selected by env vars alone (C2).
+
+    Env prefix carries the tier name: MLSC_LLM_INTENT_*, MLSC_LLM_LABELING_*,
+    MLSC_LLM_INSIGHT_*. Any OpenAI-compatible endpoint works — Ollama, vLLM,
+    or a cloud provider — because only the base_url and api_key differ.
+    """
+
+    model_config = SettingsConfigDict(frozen=True, extra="ignore")
+
+    base_url: str
+    api_key: SecretStr = SecretStr("not-required")
+    model: str
+
+
 @dataclass(frozen=True)
 class Settings:
     postgres: PostgresSettings
@@ -112,6 +127,24 @@ class Settings:
 def load_settings() -> Settings:
     """Validate every required setting from the process environment, without network access."""
     return Settings(postgres=_load(PostgresSettings), redis=_load(RedisSettings))
+
+
+def load_llm_tier_settings(tier: str) -> LlmTierSettings:
+    """Raises ConfigurationError if the tier has no configured endpoint.
+
+    Called at startup, not at first use — a misconfigured tier must fail
+    before any batch runs, not three hours into one (design.md, "Failure
+    strategy": TierNotConfigured crashes at startup).
+    """
+    prefix = f"MLSC_LLM_{tier.upper()}_"
+
+    class _TierSettings(LlmTierSettings):
+        model_config = SettingsConfigDict(env_prefix=prefix, frozen=True, extra="ignore")
+
+    try:
+        return _TierSettings()
+    except ValidationError as error:
+        raise ConfigurationError(_render_invalid_settings(_TierSettings, error)) from None
 
 
 def _load[SettingsT: BaseSettings](model: type[SettingsT]) -> SettingsT:

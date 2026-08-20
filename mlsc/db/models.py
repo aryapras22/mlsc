@@ -4,10 +4,13 @@ import uuid
 from datetime import date, datetime
 from enum import Enum
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, ForeignKey, MetaData, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+
+EMBEDDING_DIMENSIONS = 384
 
 _NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",
@@ -333,3 +336,57 @@ class Document(Base):
     engagement: Mapped[int | None]
     content_hash: Mapped[str]
     raw: Mapped[dict] = mapped_column(JSONB)
+
+
+class SentimentLabel(str, Enum):
+    NEGATIVE = "negative"
+    NEUTRAL = "neutral"
+    POSITIVE = "positive"
+
+
+class Intent(str, Enum):
+    FEATURE_REQUEST = "feature_request"
+    BUG_REPORT = "bug_report"
+    PRAISE = "praise"
+    COMPLAINT = "complaint"
+    QUESTION = "question"
+    CHURN_SIGNAL = "churn_signal"
+    PRICING = "pricing"
+    COMPETITOR_MENTION = "competitor_mention"
+    SPAM = "spam"
+
+
+class Enrichment(Base):
+    """Everything derived from one document's text. One row per document.
+
+    ``model_versions`` is one JSON map of stage name to model version rather
+    than a column per stage, so "which documents have a stale embedding" is a
+    query, not a migration (design.md, "Domain shapes").
+    """
+
+    __tablename__ = "enrichments"
+    __table_args__ = (
+        UniqueConstraint("document_id", name="uq_enrichments_document_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    )
+    language: Mapped[str | None]
+    language_confidence: Mapped[float | None]
+    is_relevant: Mapped[bool] = mapped_column(default=True)
+    relevance_score: Mapped[float | None]
+    near_duplicate_of: Mapped[uuid.UUID | None]
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
+    sentiment_score: Mapped[float | None]
+    sentiment_label: Mapped[SentimentLabel | None]
+    intent: Mapped[Intent | None]
+    intent_confidence: Mapped[float | None]
+    llm_provider: Mapped[str | None]
+    llm_model: Mapped[str | None]
+    prompt_version: Mapped[str | None]
+    model_versions: Mapped[dict] = mapped_column(JSONB, default=dict)
+    enriched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
