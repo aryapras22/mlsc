@@ -170,6 +170,7 @@ class IngestionRun(Base):
     run_date: Mapped[date]
     is_backfill: Mapped[bool] = mapped_column(default=False)
     status: Mapped[RunStatus] = mapped_column(default=RunStatus.PENDING)
+    stage_status: Mapped[dict] = mapped_column(JSONB, default=dict)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

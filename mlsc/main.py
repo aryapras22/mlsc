@@ -7,8 +7,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from mlsc.api.monitors import router as monitors_router
+from mlsc.api.runs import router as runs_router
 from mlsc.application.monitors import MonitorService
+from mlsc.application.runs import RunService
 from mlsc.bootstrap import start_process
+from mlsc.core.locks import RunLock
+from mlsc.tasks.celery_dispatcher import CeleryDispatcher
 
 
 @asynccontextmanager
@@ -16,6 +20,9 @@ async def _lifespan(app: FastAPI):
     startup = await start_process()
     app.state.startup = startup
     app.state.monitor_service = MonitorService(startup.session_factory)
+    app.state.run_service = RunService(
+        startup.session_factory, RunLock(startup.redis), CeleryDispatcher()
+    )
     try:
         yield
     finally:
@@ -26,6 +33,7 @@ async def _lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="mlsc", lifespan=_lifespan)
     app.include_router(monitors_router)
+    app.include_router(runs_router)
     return app
 
 
