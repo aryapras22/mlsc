@@ -893,3 +893,137 @@ class Delivery(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+class Purpose(str, Enum):
+    """What a label set is for — relevance labels and event labels are
+    validated differently (design.md, "Trust boundary")."""
+
+    RELEVANCE = "relevance"
+    EVENTS = "events"
+
+
+class MeasureStatus(str, Enum):
+    """Requirement 8: a measure that cannot be computed says so, rather
+    than being absent or reported as zero (design.md, "Domain shapes":
+    ``Measure`` carries a status alongside its value)."""
+
+    COMPUTED = "computed"
+    UNAVAILABLE_NO_LABELS = "unavailable_no_labels"
+    UNAVAILABLE_INSUFFICIENT_HISTORY = "unavailable_insufficient_history"
+
+
+class LabelSet(Base):
+    """A named, stored group of labels for one monitor and purpose.
+
+    A first-class stored artefact rather than a file read at run time
+    (design.md, "Domain shapes") — requirement 9 needs the same labels
+    reachable months later.
+    """
+
+    __tablename__ = "label_sets"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    purpose: Mapped[Purpose]
+    notes: Mapped[str | None]
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class DocumentLabel(Base):
+    """A human's direct relevance judgement on one real document.
+
+    Never derived from the pipeline's own relevance score, intent
+    classification, or any other system output (tasks.md, task 1's
+    labelling protocol) — that is a protocol requirement this type cannot
+    enforce by itself, so ``labelled_by`` must name the human rater.
+    """
+
+    __tablename__ = "document_labels"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    label_set_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("label_sets.id", ondelete="CASCADE"), index=True
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    )
+    is_relevant: Mapped[bool]
+    labelled_by: Mapped[str]
+    labelled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class EventLabel(Base):
+    """One real-world event a monitor's target experienced, sourced from a
+    public reference — never from this system's own output (design.md,
+    "Trust boundary"; ``LabelContaminated``'s enforcement).
+    """
+
+    __tablename__ = "event_labels"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    label_set_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("label_sets.id", ondelete="CASCADE"), index=True
+    )
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    occurred_on: Mapped[date]
+    kind: Mapped[str]
+    description: Mapped[str]
+    external_reference: Mapped[str]
+
+
+class Snapshot(Base):
+    """A frozen document-to-topic map for one monitor on one day.
+
+    Stability compares two moments, so one must be stored (design.md,
+    "Alternatives": "Computing stability against the live assignment
+    table"). Unique per monitor and day so the snapshot job is idempotent.
+    """
+
+    __tablename__ = "snapshots"
+    __table_args__ = (
+        UniqueConstraint("monitor_id", "taken_on", name="uq_snapshots_monitor_taken_on"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    taken_on: Mapped[date]
+    assignments: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Report(Base):
+    """One harness run's every measure, with the configuration that
+    produced them.
+
+    ``config_fingerprint`` and ``code_version`` are not optional metadata:
+    every measure here is a function of the thresholds and weights in
+    force, and a report that does not say which configuration produced it
+    is not comparable to any other (design.md, "Domain shapes").
+    """
+
+    __tablename__ = "reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    period_start: Mapped[date]
+    period_end: Mapped[date]
+    measures: Mapped[dict] = mapped_column(JSONB, default=dict)
+    config_fingerprint: Mapped[str]
+    code_version: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

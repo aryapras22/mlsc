@@ -1,17 +1,20 @@
-"""Health evaluation after a run, and weekly smoke-test maintenance."""
+"""Health evaluation after a run, weekly smoke-test maintenance, and the
+evaluation harness's snapshot job.
+"""
 
 from __future__ import annotations
 
 import statistics
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from mlsc.application.health import evaluate
-from mlsc.db.models import AlertKind, FetchStats, MonitorSource, SourceState
+from mlsc.db.models import AlertKind, Assignment, Document, FetchStats, MonitorSource, SourceState
 from mlsc.repositories.alerts import ScraperAlertRepository
+from mlsc.repositories.evaluation import SnapshotRepository
 from mlsc.repositories.health import HealthRepository
 
 
@@ -81,3 +84,28 @@ async def evaluate_source_health(
                 )
 
         await session.commit()
+
+
+async def take_snapshot(
+    session_factory: async_sessionmaker[AsyncSession], *, monitor_id: uuid.UUID, taken_on: date | None = None
+) -> uuid.UUID:
+    """Requirement 3: freeze a monitor's current document-to-topic map, so
+    a later stability measure has something from this moment to compare
+    against — stability cannot be measured retrospectively, so this must
+    run on a schedule regardless of whether anything else in the harness is
+    built yet (tasks.md, task 4's note).
+    """
+    taken_on = taken_on or date.today()
+    async with session_factory() as session:
+        # Assignment carries no monitor_id of its own, so scope to this
+        # monitor's documents via a join.
+        result = await session.execute(
+            select(Assignment.document_id, Assignment.topic_id)
+            .join(Document, Document.id == Assignment.document_id)
+            .where(Document.monitor_id == monitor_id)
+        )
+        assignments = {str(document_id): str(topic_id) for document_id, topic_id in result.all()}
+
+        snapshot = await SnapshotRepository(session).freeze(monitor_id, taken_on, assignments)
+        await session.commit()
+        return snapshot.id
