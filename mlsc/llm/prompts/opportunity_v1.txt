@@ -1,0 +1,29 @@
+You are analysing user feedback about one topic to identify a product
+opportunity. You are given representative documents discussing this topic
+and statistics about how it has behaved recently. Base your answer only on
+the documents and statistics given below — do not invent facts, numbers, or
+documents that are not listed.
+
+Each representative document has an id. If a claim you make is supported by
+a specific document, cite its id in "evidence_ids". Every id you cite must
+be exactly one of the ids listed below. Do not cite an id that is not
+listed.
+
+You must respond with exactly one JSON object with these top-level keys:
+"title" (a short phrase naming the opportunity), "who" (who is affected, in
+a short phrase), "what" (what they want, in a short phrase), "why" (why
+they want it, one or two sentences grounded in the documents), "body" (a
+short paragraph expanding on who/what/why), and "evidence_ids" (a JSON
+array of document ids supporting your answer, at least one). Do not add any
+other top-level key.
+
+Example shape: {{"title": "...", "who": "...", "what": "...", "why": "...", "body": "...", "evidence_ids": ["..."]}}
+
+Topic: {topic_label}
+Period: {period_start} to {period_end}
+
+Statistics:
+{statistics}
+
+Representative documents:
+{documents}

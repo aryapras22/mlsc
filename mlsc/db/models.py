@@ -724,3 +724,104 @@ class TrendScore(Base):
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class InsightKind(str, Enum):
+    DIGEST = "digest"
+    OPPORTUNITY = "opportunity"
+
+
+class SkipReason(str, Enum):
+    """Distinguishes an honest refusal from a failure (design.md, "Closed
+    variants"): the first three are the ordinary state of a quiet topic, the
+    fourth needs attention."""
+
+    DAY_UNTRUSTWORTHY = "day_untrustworthy"
+    EVIDENCE_TOO_THIN = "evidence_too_thin"
+    NO_CHANGE_DETECTED = "no_change_detected"
+    GENERATION_FAILED = "generation_failed"
+
+
+class Insight(Base):
+    """One generated digest or opportunity for a monitor's topic and period.
+
+    Unique over monitor, topic, period and kind (C12): a re-run over the
+    same period with no new evidence converges on this row rather than
+    duplicating it (requirement 8). A digest has no single topic, so
+    ``topic_id`` is nullable and the uniqueness is over the all-topics case
+    the same way ``DailyMetric`` admits an all-value row.
+    """
+
+    __tablename__ = "insights"
+    __table_args__ = (
+        Index(
+            "uq_insights_topic_identity", "monitor_id", "topic_id", "period_start", "period_end", "kind",
+            unique=True, postgresql_where="topic_id IS NOT NULL",
+        ),
+        Index(
+            "uq_insights_digest_identity", "monitor_id", "period_start", "period_end", "kind",
+            unique=True, postgresql_where="topic_id IS NULL",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    topic_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("topics.id", ondelete="SET NULL"), index=True
+    )
+    period_start: Mapped[date]
+    period_end: Mapped[date]
+    kind: Mapped[InsightKind]
+    title: Mapped[str]
+    body: Mapped[str]
+    who: Mapped[str | None]
+    what: Mapped[str | None]
+    why: Mapped[str | None]
+    score: Mapped[float | None]
+    score_components: Mapped[dict] = mapped_column(JSONB, default=dict)
+    evidence_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    llm_provider: Mapped[str]
+    llm_model: Mapped[str]
+    prompt_version: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Judgement(Base):
+    """A user's usefulness verdict on one insight. Requirement 9 — recorded
+    against an existing insight, validated at the application boundary."""
+
+    __tablename__ = "judgements"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    insight_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("insights.id", ondelete="CASCADE"), index=True
+    )
+    useful: Mapped[bool]
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class GenerationSkip(Base):
+    """Requirement 7's refusals, recorded so declining to generate is legible
+    rather than looking like a topic nobody thought about."""
+
+    __tablename__ = "generation_skips"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    topic_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), index=True
+    )
+    period_start: Mapped[date]
+    period_end: Mapped[date]
+    reason: Mapped[SkipReason]
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

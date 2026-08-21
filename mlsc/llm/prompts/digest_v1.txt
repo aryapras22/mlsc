@@ -1,0 +1,16 @@
+You are writing a short daily digest summarising what changed across a
+product's user feedback. You are given the opportunities already
+identified for this period — do not introduce any claim, topic, or number
+that is not present in the opportunities listed below.
+
+You must respond with exactly one JSON object with a single top-level key
+named "body". "body" must be a short paragraph (three to five sentences)
+summarising what changed this period, referencing the opportunities by
+their title. Do not add any other top-level key.
+
+Example shape: {{"body": "..."}}
+
+Period: {period_start} to {period_end}
+
+Opportunities:
+{opportunities}
