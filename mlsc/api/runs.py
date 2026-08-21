@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from mlsc.application.runs import MonitorNotRunnable, RunAlreadyActive
 from mlsc.repositories.runs import RunRepository
+from mlsc.schemas.metrics import RunView
 
 router = APIRouter(tags=["runs"])
 
@@ -42,30 +43,18 @@ async def trigger_run(
     return RunTriggerResponse(run_id=run_id)
 
 
-@router.get("/runs/{run_id}")
-async def get_run(run_id: uuid.UUID, request: Request) -> dict:
+@router.get("/runs/{run_id}", response_model=RunView)
+async def get_run(run_id: uuid.UUID, request: Request) -> RunView:
+    """Requirement 5: a client polls a run id and sees the stage reached and
+    whether it succeeded, was partial, or failed."""
     async with request.app.state.startup.session_factory() as session:
-        repository = RunRepository(session)
-        run = await repository.get(run_id)
+        run = await RunRepository(session).get(run_id)
         if run is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
-        stats = await repository.stats_for_run(run_id)
-    return {
-        "id": run.id,
-        "monitor_id": run.monitor_id,
-        "run_date": run.run_date,
-        "status": run.status,
-        "stage_status": run.stage_status,
-        "sources": [
-            {
-                "source_id": s.monitor_source_id,
-                "kept": s.kept,
-                "validation_failed": s.validation_failed,
-                "error": s.error,
-            }
-            for s in stats
-        ],
-    }
+    return RunView(
+        id=run.id, monitor_id=run.monitor_id, run_date=run.run_date, status=run.status.value,
+        stage_status=run.stage_status, started_at=run.started_at, finished_at=run.finished_at,
+    )
 
 
 @router.get("/monitors/{monitor_id}/runs")

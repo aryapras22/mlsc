@@ -825,3 +825,71 @@ class GenerationSkip(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+class ReadAlertKind(str, Enum):
+    """Distinct from ``AlertKind`` (scraper health) — a rule for one must not
+    match the other (requirements.md, requirement 8; design.md, "Alternatives":
+    "One alert rule table matching both kinds by a condition")."""
+
+    PRODUCT = "product"
+    SCRAPER = "scraper"
+
+
+class Channel(str, Enum):
+    EMAIL = "email"
+    WEBHOOK = "webhook"
+
+
+class DeliveryState(str, Enum):
+    PENDING = "pending"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+    ABANDONED = "abandoned"
+
+
+class AlertRule(Base):
+    """A user's standing request to be notified when a matching change is
+    detected. ``kind`` decides which events this rule's evaluation query can
+    ever see — enforced by the query in ``mlsc/tasks/alerts.py``, not by a
+    filter someone could omit (design.md, "Success path")."""
+
+    __tablename__ = "alert_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[ReadAlertKind]
+    conditions: Mapped[dict] = mapped_column(JSONB, default=dict)
+    channel: Mapped[Channel]
+    target: Mapped[str]
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Delivery(Base):
+    """One notification attempt for one rule against one event.
+
+    A durable row separate from the rule (design.md, "Domain shapes"): the
+    alert exists whether or not it was ever delivered, and a failed send is
+    retried without re-running detection (requirement 9).
+    """
+
+    __tablename__ = "deliveries"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    rule_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("alert_rules.id", ondelete="CASCADE"), index=True
+    )
+    event_id: Mapped[uuid.UUID]
+    attempts: Mapped[int] = mapped_column(default=0)
+    last_error: Mapped[str | None]
+    state: Mapped[DeliveryState] = mapped_column(default=DeliveryState.PENDING)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
