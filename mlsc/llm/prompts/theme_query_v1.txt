@@ -1,0 +1,18 @@
+Expand the description below into search queries for discovering competing
+apps, forums, and news coverage in this space. Prefer specific queries over
+generic ones: each should narrow toward the described space rather than a
+single common word.
+
+Return between 1 and 8 queries. Do not return more than 8: each one is run
+against every discovery surface, so a long list multiplies cost without
+adding coverage.
+
+You must respond with exactly one JSON object with a single top-level key
+named "queries". "queries" must be a JSON array of objects, each with keys
+"text" and "rationale". "rationale" is one sentence on why this query
+targets the description. Do not add any other top-level key.
+
+Example shape: {{"queries": [{{"text": "ai note taking app", "rationale": "direct match for the described space"}}]}}
+
+Description:
+{description}

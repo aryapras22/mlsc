@@ -184,6 +184,21 @@ class TrendDetectionSettings(BaseSettings):
         return self
 
 
+class ThemeRelevanceSettings(BaseSettings):
+    """The basis and threshold a theme monitor's relevance scorer uses.
+
+    An open decision in the spec (theme-monitors requirements.md, "Open
+    decisions"), resolved empirically per monitor rather than guessed —
+    this is the one injected configuration value that substitution changes
+    without touching the scorer itself.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="MLSC_THEME_RELEVANCE_", frozen=True, extra="ignore")
+
+    basis: Literal["description", "queries", "corpus_centroid"] = "description"
+    threshold: float = Field(default=0.35, gt=0, lt=1)
+
+
 @dataclass(frozen=True)
 class Settings:
     postgres: PostgresSettings
@@ -205,6 +220,10 @@ def load_trend_detection_settings() -> TrendDetectionSettings:
     """Validated at startup so no gate or score weight can be silently
     disabled by a zero (requirement 4, 6, 7, 9)."""
     return _load(TrendDetectionSettings)
+
+
+def load_theme_relevance_settings() -> ThemeRelevanceSettings:
+    return _load(ThemeRelevanceSettings)
 
 
 def load_llm_tier_settings(tier: str) -> LlmTierSettings:

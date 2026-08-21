@@ -43,6 +43,18 @@ class CollectionResult:
     quota_reached: bool
 
 
+@dataclasses.dataclass(frozen=True)
+class HackerNewsQueryViability:
+    """Whether a generated query surfaces real discussion on Hacker News.
+
+    Requirement 3's "feed discovery" surface: like ``NewsAdapter``, this
+    adapter's instance key is the query itself (``_validate_hackernews_config``),
+    so what discovery proposes is the query's own viability as a source.
+    """
+
+    matched_titles: list[str]
+
+
 @register("hackernews")
 class HackerNewsAdapter(SourceAdapter):
     def __init__(self, fetch_client, *, query: str) -> None:  # noqa: ANN001
@@ -86,6 +98,27 @@ class HackerNewsAdapter(SourceAdapter):
             else cursor
         )
         return CollectionResult(collected, new_cursor, quota_reached)
+
+    async def discover(self, query: str) -> list[HackerNewsQueryViability]:
+        """Check whether ``query`` surfaces real discussion on Hacker News.
+
+        Discovery is not bound to this adapter's own configured query the
+        way ``fetch`` is: a discovery pass tries every generated query in
+        turn against this surface to see which are worth attaching.
+        """
+        request = FetchRequest(
+            url="https://hn.algolia.com/api/v1/search_by_date",
+            host_key=_HOST_KEY,
+            client_profile=ClientProfile.PLAIN,
+            query=(("query", query), ("tags", "story")),
+        )
+        outcome = await self._fetch_client.get(request, self.expectations)
+        if outcome.status is not FetchStatus.OK:
+            raise HackerNewsCollectionFailed(outcome.status, outcome.payload)
+        if not outcome.payload:
+            return []
+        titles = [hit.get("title", "") for hit in outcome.payload[:5]]
+        return [HackerNewsQueryViability(matched_titles=titles)]
 
 
 def _parse_hit(hit: dict[str, Any]) -> HackerNewsItem:

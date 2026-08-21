@@ -99,6 +99,121 @@ class SourceName(str, Enum):
     HACKERNEWS = "hackernews"
 
 
+class CandidateState(str, Enum):
+    """A discovered entity's review state. No expiry: a rejection is
+    permanent (requirement 6), so there is no fourth value for "lapsed"."""
+
+    PROPOSED = "proposed"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+class ThemeSeed(Base):
+    """A theme monitor's description and the queries derived from it.
+
+    One row per theme monitor. ``description`` and ``queries`` are kept as
+    separate fields deliberately: a user editing queries must not rewrite
+    the description that produced them (design.md, "Domain shapes").
+    """
+
+    __tablename__ = "theme_seeds"
+    __table_args__ = (UniqueConstraint("monitor_id", name="uq_theme_seeds_monitor_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    description: Mapped[str]
+    queries: Mapped[list] = mapped_column(JSONB, default=list)
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class EntityCandidate(Base):
+    """One discovered entity awaiting review.
+
+    Deliberately not a ``MonitorSource``: it becomes one only on acceptance
+    (``accept_candidate``), which is what makes requirement 5 — an
+    unreviewed candidate contributes nothing — structural rather than a
+    flag someone must check. Unique on ``(monitor_id, source_name,
+    entity_ref)`` so a repeated discovery pass upserts the same row instead
+    of duplicating it, and a rejected row is never reproposed (requirement 6).
+    """
+
+    __tablename__ = "entity_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "monitor_id", "source_name", "entity_ref", name="uq_entity_candidates_identity"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    source_name: Mapped[SourceName]
+    entity_ref: Mapped[str]
+    display_name: Mapped[str]
+    reason: Mapped[str]
+    proposed_by_query: Mapped[str]
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict)
+    state: Mapped[CandidateState] = mapped_column(default=CandidateState.PROPOSED)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DiscoverySurface(str, Enum):
+    """Which search this candidate came from. ``FEED_DISCOVERY`` is Hacker
+    News's search-by-date treated as a feed of discussion, not a literal
+    RSS-feed search engine — no anonymous one exists to query (theme-monitors
+    design.md, "Alternatives"); its viable queries become HACKERNEWS
+    sources the same way a viable ``NEWS_QUERY`` becomes a NEWS source."""
+
+    APP_STORE_SEARCH = "app_store_search"
+    PLAY_SEARCH = "play_search"
+    FEED_DISCOVERY = "feed_discovery"
+    NEWS_QUERY = "news_query"
+
+
+class NoDiscoveryReason(str, Enum):
+    """Why a discovery pass proposed nothing. Requirement 8: recorded rather
+    than left to be inferred from an empty candidate list."""
+
+    NO_QUERIES = "no_queries"
+    EVERY_SURFACE_EMPTY = "every_surface_empty"
+
+
+class DiscoveryOutcome(Base):
+    """One discovery pass's summary: which queries ran, how many candidates
+    resulted, and why if none did.
+
+    Written even on the empty pass (design.md, "Domain shapes") — a theme
+    with nothing to watch must say so rather than looking idle for a reason
+    nobody recorded.
+    """
+
+    __tablename__ = "discovery_outcomes"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    queries_used: Mapped[list] = mapped_column(JSONB, default=list)
+    proposed: Mapped[int] = mapped_column(default=0)
+    rejected_known: Mapped[int] = mapped_column(default=0)
+    reason: Mapped[NoDiscoveryReason | None]
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class RunStatus(str, Enum):
     """An ingestion run's lifecycle for one monitor on one date."""
 
@@ -356,6 +471,19 @@ class Intent(str, Enum):
     SPAM = "spam"
 
 
+class RelevanceBasis(str, Enum):
+    """What a theme monitor's relevance verdict was scored against.
+
+    Named rather than left implicit so a later change to how relevance is
+    computed is attributable per verdict, not invisible (theme-monitors
+    design.md, "Domain shapes"). ``None`` on ``Enrichment.relevance_basis``
+    means the length-floor scorer every monitor gets, not a theme scorer."""
+
+    DESCRIPTION = "description"
+    QUERIES = "queries"
+    CORPUS_CENTROID = "corpus_centroid"
+
+
 class Enrichment(Base):
     """Everything derived from one document's text. One row per document.
 
@@ -377,6 +505,7 @@ class Enrichment(Base):
     language_confidence: Mapped[float | None]
     is_relevant: Mapped[bool] = mapped_column(default=True)
     relevance_score: Mapped[float | None]
+    relevance_basis: Mapped[RelevanceBasis | None]
     near_duplicate_of: Mapped[uuid.UUID | None]
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
     sentiment_score: Mapped[float | None]

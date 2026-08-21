@@ -49,21 +49,32 @@ async def _run_downstream_pipeline(
     successfully, and a downstream failure is retried by re-running this
     pipeline rather than by re-collecting.
     """
-    from mlsc.db.models import IngestionRun
+    from mlsc.db.models import IngestionRun, Monitor, TargetType
     from mlsc.pipeline.enrich import Embedder, SentimentScorer
     from mlsc.tasks.analytics import run_daily_analytics
     from mlsc.tasks.enrich import ALL_STAGES, enrich_documents
+    from mlsc.tasks.themes import build_theme_relevance_context
 
     async with session_factory() as session:
         run = await session.get(IngestionRun, run_id)
         run_date = run.run_date
+        monitor = await session.get(Monitor, monitor_id)
+        is_theme = monitor.target_type is TargetType.THEME
+
+    embedder = Embedder()
+    theme_relevance = (
+        await build_theme_relevance_context(session_factory, monitor_id=monitor_id, embedder=embedder)
+        if is_theme
+        else None
+    )
 
     await enrich_documents(
         session_factory,
         monitor_id=monitor_id,
         stages=ALL_STAGES,
-        embedder=Embedder(),
+        embedder=embedder,
         sentiment_scorer=SentimentScorer(),
+        theme_relevance=theme_relevance,
     )
     await run_daily_analytics(session_factory, monitor_id=monitor_id, run_date=run_date)
 

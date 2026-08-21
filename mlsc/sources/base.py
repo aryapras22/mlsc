@@ -14,6 +14,14 @@ from mlsc.core.fetch.client import FetchClient
 from mlsc.core.fetch.contracts import FetchExpectations
 
 
+class DiscoveryNotSupported(RuntimeError):
+    """Raised by ``discover`` for an adapter over a surface with no search
+    capability. Not every source can be searched for candidates by a query
+    (theme-monitors design.md, "the surfaces that support it") — the default
+    implementation raises this rather than forcing every adapter to override
+    a method most of them cannot meaningfully implement."""
+
+
 class SourceAdapter(ABC):
     """One adapter per source, holding only a ``FetchClient`` and its expectations."""
 
@@ -28,3 +36,12 @@ class SourceAdapter(ABC):
     @abstractmethod
     async def fetch(self, entity: str, cursor: Any, quota: int) -> Any:
         """Fetch and parse one page of validated rows for ``entity`` starting at ``cursor``."""
+
+    async def discover(self, query: str) -> list[Any]:
+        """Search this surface for candidate entities matching ``query``.
+
+        Only adapters over a genuinely searchable, anonymous surface override
+        this (theme-monitors requirement 3); every other adapter raises
+        ``DiscoveryNotSupported``.
+        """
+        raise DiscoveryNotSupported(type(self).__name__)

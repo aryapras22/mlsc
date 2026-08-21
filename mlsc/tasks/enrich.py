@@ -10,7 +10,7 @@ from enum import Enum
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from mlsc.db.models import Document, Enrichment
+from mlsc.db.models import Document, Enrichment, RelevanceBasis
 from mlsc.llm.cache import LlmResponseCache
 from mlsc.llm.router import LlmRouter
 from mlsc.pipeline.duplicate import is_near_duplicate, simhash
@@ -18,7 +18,7 @@ from mlsc.pipeline.enrich import Embedder, SentimentScorer
 from mlsc.pipeline.intent import PROMPT_VERSION, classify_intents
 from mlsc.pipeline.language import detect_language
 from mlsc.pipeline.normalize import clean_text, hash_content, strip_pii
-from mlsc.pipeline.relevance import is_relevant, score_relevance
+from mlsc.pipeline.relevance import ThemeRelevanceScorer, is_relevant, score_relevance
 
 _INTENT_BATCH_SIZE = 40
 
@@ -36,6 +36,28 @@ class Stage(str, Enum):
 ALL_STAGES = frozenset(Stage)
 
 
+class ThemeRelevanceContext:
+    """What a theme monitor needs at the ``RELEVANCE`` stage: a scorer, the
+    reference embeddings for its basis, and which basis produced them.
+
+    Passed as one bundle rather than three parameters because the three
+    always travel together — a scorer without knowing which reference set
+    it was given, or a basis without the embeddings it names, is not a
+    usable configuration (theme-monitors design.md, "Dependencies, injected").
+    """
+
+    def __init__(
+        self,
+        scorer: ThemeRelevanceScorer,
+        *,
+        reference_embeddings: list[list[float]],
+        basis: RelevanceBasis,
+    ) -> None:
+        self.scorer = scorer
+        self.reference_embeddings = reference_embeddings
+        self.basis = basis
+
+
 async def enrich_documents(
     session_factory: async_sessionmaker[AsyncSession],
     *,
@@ -46,6 +68,7 @@ async def enrich_documents(
     llm_router: LlmRouter | None = None,
     llm_cache: LlmResponseCache | None = None,
     accepted_languages: frozenset[str] | None = None,
+    theme_relevance: ThemeRelevanceContext | None = None,
 ) -> int:
     """Enrich every document for a monitor missing at least one requested stage.
 
@@ -92,7 +115,22 @@ async def enrich_documents(
                     written += 1
                     continue
 
-            if Stage.RELEVANCE in stages:
+            document_vector: list[float] | None = None
+            if theme_relevance is not None and Stage.RELEVANCE in stages and stripped:
+                # A theme has no fixed target the way a product monitor
+                # does, so its relevance verdict is scored against the
+                # embedding, not the length floor every other monitor gets
+                # (learn.md, "A theme's boundary is fuzzy"). The vector is
+                # computed once here and reused below if EMBED also ran,
+                # rather than encoding the same text twice in one pass.
+                [document_vector] = embedder.encode([stripped])
+                verdict = theme_relevance.scorer.score(
+                    document_vector, theme_relevance.reference_embeddings
+                )
+                enrichment.relevance_score = verdict.score
+                enrichment.is_relevant = verdict.is_relevant
+                enrichment.relevance_basis = theme_relevance.basis
+            elif Stage.RELEVANCE in stages:
                 score = score_relevance(stripped)
                 enrichment.relevance_score = score
                 enrichment.is_relevant = is_relevant(score)
@@ -114,7 +152,7 @@ async def enrich_documents(
                 }
 
             if Stage.EMBED in stages and stripped:
-                [vector] = embedder.encode([stripped])
+                vector = document_vector if document_vector is not None else embedder.encode([stripped])[0]
                 enrichment.embedding = vector
                 enrichment.model_versions = {
                     **enrichment.model_versions, "embed": "all-MiniLM-L6-v2"

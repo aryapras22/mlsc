@@ -13,8 +13,11 @@ from datetime import datetime
 from importlib.metadata import version
 from typing import Any
 
+import json
+
 from google_play_scraper.constants.element import ElementSpecs
 from google_play_scraper.constants.google_play import Sort
+from google_play_scraper.constants.regex import Regex
 from google_play_scraper.constants.request import Formats
 
 from mlsc.core.fetch.contracts import (
@@ -30,6 +33,19 @@ LIBRARY_VERSION = version("google-play-scraper")
 
 _HOST_KEY = "play.google.com"
 _PAGE_SIZE = 100
+
+_SEARCH_EXPECTATIONS = FetchExpectations(
+    content_type="text/html", body_format="raw", min_rows_when_healthy=0
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class PlaySearchResult:
+    """One candidate app matched by a discovery query."""
+
+    app_id: str
+    title: str
+    description: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -139,6 +155,67 @@ class PlayAdapter(SourceAdapter):
 
         new_cursor = _newest_cursor(collected, fallback=cursor)
         return CollectionResult(reviews=collected, new_cursor=new_cursor, quota_reached=quota_reached)
+
+    async def discover(self, query: str) -> list[PlaySearchResult]:
+        """Search the Play Store's public catalog for apps matching ``query``.
+
+        The store's search results page is HTML with an embedded data
+        payload (the same ``AF_initDataCallback`` script blocks
+        ``google-play-scraper``'s own ``search()`` parses), fetched through
+        ``FetchClient`` rather than that library's own HTTP call so this
+        request gets the same throttling and breaker as every other one
+        (requirement 1).
+        """
+        request = FetchRequest(
+            url="https://play.google.com/store/search",
+            host_key=_HOST_KEY,
+            client_profile=ClientProfile.PLAIN,
+            query=(("q", query), ("c", "apps"), ("hl", "en"), ("gl", "us")),
+        )
+        outcome = await self._fetch_client.get(request, _SEARCH_EXPECTATIONS)
+        if outcome.status is not FetchStatus.OK:
+            raise PlayCollectionFailed(outcome.status, outcome.payload)
+        return _parse_search_results(outcome.payload)
+
+
+def _parse_search_results(html: str) -> list[PlaySearchResult]:
+    dataset: dict[str, Any] = {}
+    for match in Regex.SCRIPT.findall(html):
+        key_match = Regex.KEY.findall(match)
+        value_match = Regex.VALUE.findall(match)
+        if key_match and value_match:
+            try:
+                dataset[key_match[0]] = json.loads(value_match[0])
+            except json.JSONDecodeError:
+                continue
+
+    apps_block = dataset.get("ds:4")
+    if not apps_block:
+        return []
+
+    entries: list[Any] | None = None
+    for candidate_block in apps_block[0][1]:
+        try:
+            entries = candidate_block[22][0]
+        except (IndexError, TypeError, KeyError):
+            continue
+        if entries:
+            break
+    if not entries:
+        return []
+
+    results: list[PlaySearchResult] = []
+    for entry in entries:
+        fields = {name: spec.extract_content(entry) for name, spec in ElementSpecs.SearchResult.items()}
+        app_id = fields.get("appId")
+        if not app_id:
+            continue
+        results.append(
+            PlaySearchResult(
+                app_id=app_id, title=fields.get("title") or "", description=fields.get("description") or "",
+            )
+        )
+    return results
 
 
 def _build_request(package_id: str, count: int, continuation_token: str | None) -> FetchRequest:

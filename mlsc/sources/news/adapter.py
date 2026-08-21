@@ -52,6 +52,20 @@ class CollectionResult:
     filtered: int
 
 
+@dataclasses.dataclass(frozen=True)
+class NewsQueryViability:
+    """Whether a generated query surfaces real news coverage, and how much.
+
+    Requirement 3's "news query" discovery surface: a theme has no fixed
+    news entity to search for, so what is discovered here is the query's
+    own viability as a NEWS source — its ``entity_ref`` is the query text
+    itself, matching how ``_validate_news_config`` already keys a NEWS
+    source by its configured queries.
+    """
+
+    matched_titles: list[str]
+
+
 @register("news")
 class NewsAdapter(SourceAdapter):
     def __init__(
@@ -118,6 +132,31 @@ class NewsAdapter(SourceAdapter):
             NewsCursor(last_published_at=articles[0].published_at) if articles else cursor
         )
         return CollectionResult(articles, new_cursor, quota_reached, filtered)
+
+    async def discover(self, query: str) -> list[NewsQueryViability]:
+        """Check whether ``query`` surfaces real news coverage.
+
+        A search over titles only, without resolving redirects or
+        extracting article text — discovery needs to know whether the
+        query is worth attaching as a source, not to collect its content
+        yet (theme-monitors design.md, "Success path": discovery maps
+        results to candidates with their reason).
+        """
+        request = FetchRequest(
+            url="https://news.google.com/rss/search",
+            host_key=_HOST_KEY,
+            client_profile=ClientProfile.PLAIN,
+            query=(("q", query),),
+        )
+        outcome = await self._fetch_client.get(request, self.expectations)
+        if outcome.status is not FetchStatus.OK:
+            raise NewsCollectionFailed(outcome.status, outcome.payload)
+
+        parsed = feedparser.parse(outcome.payload if isinstance(outcome.payload, str) else "")
+        if not parsed.entries:
+            return []
+        titles = [entry.get("title", "") for entry in parsed.entries[:5]]
+        return [NewsQueryViability(matched_titles=titles)]
 
 
 def _entry_published_at(entry: Any) -> datetime:

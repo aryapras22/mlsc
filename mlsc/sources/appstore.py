@@ -13,6 +13,24 @@ from mlsc.sources.registry import register
 LIBRARY_VERSION = "itunes-rss/1"
 _HOST_KEY = "itunes.apple.com"
 
+_SEARCH_EXPECTATIONS = FetchExpectations(
+    content_type="text/javascript",
+    item_path=("results",),
+    required_fields=("trackId", "trackName", "bundleId"),
+    min_rows_when_healthy=0,  # a narrow theme query may legitimately match nothing
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class AppStoreSearchResult:
+    """One candidate app matched by a discovery query."""
+
+    app_id: str
+    bundle_id: str
+    title: str
+    seller_name: str
+    description: str
+
 
 @dataclasses.dataclass(frozen=True)
 class AppStoreCursor:
@@ -84,6 +102,35 @@ class AppStoreAdapter(SourceAdapter):
                 break
 
         return CollectionResult(collected, _newest_cursor(collected, cursor), False)
+
+    async def discover(self, query: str) -> list[AppStoreSearchResult]:
+        """Search the App Store's public catalog for apps matching ``query``.
+
+        Theme-monitors requirement 3: this is a search over the store
+        catalog, not a review collection — a distinct request against a
+        distinct endpoint from ``fetch``, sharing only the adapter's
+        ``FetchClient``.
+        """
+        request = FetchRequest(
+            url="https://itunes.apple.com/search",
+            host_key=_HOST_KEY,
+            client_profile=ClientProfile.PLAIN,
+            query=(("term", query), ("country", "us"), ("entity", "software"), ("limit", "25")),
+        )
+        outcome = await self._fetch_client.get(request, _SEARCH_EXPECTATIONS)
+        if outcome.status is not FetchStatus.OK:
+            raise AppStoreCollectionFailed(outcome.status, outcome.payload)
+        return [_parse_search_result(entry) for entry in outcome.payload]
+
+
+def _parse_search_result(entry: dict[str, Any]) -> AppStoreSearchResult:
+    return AppStoreSearchResult(
+        app_id=str(entry["trackId"]),
+        bundle_id=entry["bundleId"],
+        title=entry["trackName"],
+        seller_name=entry.get("sellerName", ""),
+        description=entry.get("description", ""),
+    )
 
 
 def _build_request(app_id: str, page: int) -> FetchRequest:

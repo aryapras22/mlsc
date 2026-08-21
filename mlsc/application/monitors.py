@@ -13,7 +13,7 @@ from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from mlsc.db.models import Monitor, MonitorStatus
+from mlsc.db.models import Monitor, MonitorStatus, TargetType, ThemeSeed
 from mlsc.repositories.monitors import MonitorRepository, ScheduleRegistrationRepository
 from mlsc.schemas.monitors import (
     MonitorCreateRequest,
@@ -58,6 +58,17 @@ class MonitorService:
             await registrations.upsert_active(
                 monitor.id, request.cron_expression, request.timezone
             )
+            if request.target_type is TargetType.THEME:
+                # A theme's description is the seed for query generation
+                # (theme-monitors requirement 1); captured here rather than
+                # deferred to first generation, so it survives independently
+                # of when generation actually runs.
+                session.add(
+                    ThemeSeed(
+                        id=self._uuid_source(), monitor_id=monitor.id,
+                        description=request.seed["description"], queries=[], provenance={},
+                    )
+                )
             await session.commit()
             return MonitorResponse.from_monitor(await monitors.get(monitor.id))
 
