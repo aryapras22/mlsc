@@ -9,14 +9,21 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, HTTPException, Request, status
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from mlsc.api.scoping import Scoping
+from mlsc.application.insights import InsightNotFound, JudgementService
 from mlsc.db.models import Insight, InsightKind, TrendEvent
 from mlsc.repositories.monitors import MonitorNotFound
 from mlsc.schemas.metrics import DateRange, EventView, InsightView
 
 router = APIRouter(prefix="/monitors/{monitor_id}", tags=["insights"])
+judgements_router = APIRouter(tags=["insights"])
+
+
+class JudgementRequest(BaseModel):
+    useful: bool
 
 
 @router.get("/events", response_model=list[EventView])
@@ -61,6 +68,18 @@ async def list_insights(
             query = query.where(Insight.kind == kind)
         result = await session.execute(query.order_by(Insight.period_start.desc()))
         return [_to_view(insight) for insight in result.scalars().all()]
+
+
+@judgements_router.post("/insights/{insight_id}/judgement", status_code=status.HTTP_204_NO_CONTENT)
+async def record_judgement(insight_id: uuid.UUID, body: JudgementRequest, request: Request) -> None:
+    """Requirement 6: a user marks an opportunity useful or not, recorded
+    against an existing insight — untrusted feedback validated at this
+    boundary as a reference to a real row (design.md, "Trust boundary")."""
+    service = JudgementService(request.app.state.startup.session_factory)
+    try:
+        await service.record(insight_id, useful=body.useful)
+    except InsightNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"insight {insight_id} not found") from None
 
 
 def _to_view(insight: Insight) -> InsightView:

@@ -17,7 +17,7 @@ from mlsc.application import metrics_view
 from mlsc.application.filters import FilterUnknown, resolve_source, resolve_topic
 from mlsc.db.models import SourceName
 from mlsc.repositories.monitors import MonitorNotFound
-from mlsc.schemas.metrics import DateRange, Metric, Overview, Series, TopicRanking
+from mlsc.schemas.metrics import DateRange, EntityComparison, Metric, Overview, Series, TopicRanking
 
 router = APIRouter(prefix="/monitors/{monitor_id}", tags=["metrics"])
 
@@ -86,5 +86,18 @@ async def get_topic_ranking(monitor_id: uuid.UUID, request: Request, start: date
         except MonitorNotFound:
             raise HTTPException(status.HTTP_404_NOT_FOUND, f"monitor {monitor_id} not found") from None
         return await metrics_view.build_ranking(
+            session, monitor_id=monitor_id, start=date_range.start, end=date_range.end
+        )
+
+
+@router.get("/compare", response_model=EntityComparison)
+async def get_entity_comparison(monitor_id: uuid.UUID, request: Request, start: date, end: date) -> EntityComparison:
+    date_range = _validate_range(start, end)
+    async with request.app.state.startup.session_factory() as session:
+        try:
+            await Scoping(session).resolve(monitor_id)
+        except MonitorNotFound:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"monitor {monitor_id} not found") from None
+        return await metrics_view.build_comparison(
             session, monitor_id=monitor_id, start=date_range.start, end=date_range.end
         )

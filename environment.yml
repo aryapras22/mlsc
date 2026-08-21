@@ -21,6 +21,7 @@ dependencies:
   - umap-learn=0.5.12
   - pymannkendall=1.4.3
   - statsmodels=0.14.6
+  - nodejs=22.23.2
   - pip
   - pip:
       - httpx==0.28.1

@@ -93,6 +93,7 @@ class TopicRankingEntry(BaseModel):
     doc_count_share: float
     sentiment_mean: float | None
     trend_score: float | None
+    breadth_ratio: float | None
 
 
 class TopicRanking(BaseModel):
@@ -154,3 +155,16 @@ class RunView(BaseModel):
     stage_status: dict[str, str]
     started_at: datetime | None
     finished_at: datetime | None
+
+
+class EntityComparisonRow(BaseModel):
+    entity_id: str
+    doc_count: int
+    share_of_voice: float
+    sentiment_mean: float | None
+
+
+class EntityComparison(BaseModel):
+    period: DateRange
+    entries: list[EntityComparisonRow]
+    data_quality: DataQuality

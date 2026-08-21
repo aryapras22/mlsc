@@ -10,7 +10,7 @@ from mlsc.api.monitors import router as monitors_router
 from mlsc.api.runs import router as runs_router
 from mlsc.api.v1.alerts import router as alerts_router
 from mlsc.api.v1.documents import router as documents_router
-from mlsc.api.v1.insights import router as insights_router
+from mlsc.api.v1.insights import judgements_router, router as insights_router
 from mlsc.api.v1.metrics import router as metrics_router
 from mlsc.application.monitors import MonitorService
 from mlsc.application.runs import RunService
@@ -40,6 +40,7 @@ def create_app() -> FastAPI:
     app.include_router(runs_router)
     app.include_router(metrics_router)
     app.include_router(insights_router)
+    app.include_router(judgements_router)
     app.include_router(documents_router)
     app.include_router(alerts_router)
     return app
