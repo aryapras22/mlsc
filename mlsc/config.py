@@ -149,6 +149,41 @@ class TopicThresholds(BaseSettings):
         return self
 
 
+class TrendDetectionSettings(BaseSettings):
+    """Every floor, cooldown, weight and correction level `trend-detection`
+    needs. Every value here is explicitly unresolved in the spec and will be
+    re-tuned against the 60-day backfill (requirements.md, "Open decisions")
+    — validated at startup so a zero cooldown or a below-minimum volume
+    floor cannot silently disable a gate C9 makes mandatory.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="MLSC_TREND_", frozen=True, extra="ignore")
+
+    min_volume_floor: int = Field(default=5, ge=1)
+    min_clean_baseline_days: int = Field(default=14, ge=7)
+    cooldown_days: int = Field(default=3, ge=1)
+    fdr_alpha: float = Field(default=0.1, gt=0, lt=1)
+    burst_z_threshold: float = Field(default=3.5, gt=0)
+    weight_burst: float = Field(default=0.3, ge=0)
+    weight_growth: float = Field(default=0.2, ge=0)
+    weight_novelty: float = Field(default=0.15, ge=0)
+    weight_breadth: float = Field(default=0.2, ge=0)
+    weight_sentiment: float = Field(default=0.15, ge=0)
+
+    @model_validator(mode="after")
+    def _require_weights_sum_positive(self) -> TrendDetectionSettings:
+        # A score built from weights that sum to zero would rank every topic
+        # identically, which is indistinguishable from the ranking never
+        # having run at all.
+        total = (
+            self.weight_burst + self.weight_growth + self.weight_novelty
+            + self.weight_breadth + self.weight_sentiment
+        )
+        if total <= 0:
+            raise ValueError("score weights must sum to a positive value")
+        return self
+
+
 @dataclass(frozen=True)
 class Settings:
     postgres: PostgresSettings
@@ -164,6 +199,12 @@ def load_topic_thresholds() -> TopicThresholds:
     """Validated at startup so a merge threshold below the assignment threshold
     cannot start (requirement 1, 3, 7)."""
     return _load(TopicThresholds)
+
+
+def load_trend_detection_settings() -> TrendDetectionSettings:
+    """Validated at startup so no gate or score weight can be silently
+    disabled by a zero (requirement 4, 6, 7, 9)."""
+    return _load(TrendDetectionSettings)
 
 
 def load_llm_tier_settings(tier: str) -> LlmTierSettings:

@@ -590,3 +590,137 @@ class DailyMetric(Base):
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class EventKind(str, Enum):
+    """What a user sees. Kept separate from ``Method`` (design.md, "Domain
+    shapes") — a burst found by two methods is still one kind a user can
+    filter their feed on."""
+
+    BURST = "burst"
+    SUSTAINED_GROWTH = "sustained_growth"
+    DECLINE = "decline"
+    SENTIMENT_FLIP = "sentiment_flip"
+    CHANGEPOINT = "changepoint"
+    EMERGENCE = "emergence"
+    NOVELTY = "novelty"
+
+
+class DetectionMethod(str, Enum):
+    """How a candidate was found."""
+
+    ROBUST_Z = "robust_z"
+    POISSON_EXACT = "poisson_exact"
+    KLEINBERG = "kleinberg"
+    MANN_KENDALL = "mann_kendall"
+    PELT = "pelt"
+    CTFIDF_DELTA = "ctfidf_delta"
+
+
+class Direction(str, Enum):
+    RISING = "rising"
+    FALLING = "falling"
+
+
+class GateReason(str, Enum):
+    """Why a topic produced no event on a day detection ran. Recorded even
+    on the failing path (design.md, "Domain shapes": ``GateOutcome``), so
+    "nothing fired" is distinguishable from "detection never ran"."""
+
+    BELOW_VOLUME_FLOOR = "below_volume_floor"
+    INSUFFICIENT_BASELINE = "insufficient_baseline"
+    COOLDOWN_ACTIVE = "cooldown_active"
+    CORRECTED_AWAY = "corrected_away"
+    DAY_UNTRUSTWORTHY = "day_untrustworthy"
+
+
+class TrendEvent(Base):
+    """One detected change for one topic on one day.
+
+    Unique over monitor, topic, date and kind (C12): a re-run of the same
+    date converges on the same row rather than duplicating, which is what
+    makes re-running a date idempotent without a lock (design.md, "Failure
+    strategy": "Event upsert conflict").
+    """
+
+    __tablename__ = "trend_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "monitor_id", "topic_id", "detected_on", "kind",
+            name="uq_trend_events_identity",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    topic_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), index=True
+    )
+    detected_on: Mapped[date] = mapped_column(index=True)
+    kind: Mapped[EventKind]
+    method: Mapped[DetectionMethod]
+    severity: Mapped[float]
+    statistics: Mapped[dict] = mapped_column(JSONB, default=dict)
+    evidence_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class GateOutcome(Base):
+    """One topic's pass/fail through detection's gates for one day.
+
+    Written for the passing case too, not only the failing one: requirement
+    1 asks what happened for a monitor and a date, and a topic that cleared
+    every gate but produced no significant test is as much an answer as one
+    that was floored out.
+    """
+
+    __tablename__ = "gate_outcomes"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    topic_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), index=True
+    )
+    bucket: Mapped[date] = mapped_column(index=True)
+    passed: Mapped[bool]
+    reason: Mapped[GateReason | None]
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class TrendScore(Base):
+    """One topic's composite ranking score for one day.
+
+    ``withheld_reason`` set means ``value`` and ``components`` carry no
+    meaning for that row — withheld rather than computed from a floor, since
+    a score computed from bad data would look as confident as a real one
+    (design.md, "Dependencies, injected"; requirements.md, C5/C6).
+    """
+
+    __tablename__ = "trend_scores"
+    __table_args__ = (
+        UniqueConstraint("monitor_id", "topic_id", "bucket", name="uq_trend_scores_identity"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    topic_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), index=True
+    )
+    bucket: Mapped[date] = mapped_column(index=True)
+    value: Mapped[float | None]
+    components: Mapped[dict] = mapped_column(JSONB, default=dict)
+    penalties: Mapped[dict] = mapped_column(JSONB, default=dict)
+    withheld_reason: Mapped[str | None]
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
