@@ -99,7 +99,8 @@ class TestOverrideOverlap:
     def test_second_submission_of_same_kind_is_refused(self, session_factory) -> None:
         monitor_id = run(_make_monitor(session_factory))
         service = OverrideService(session_factory, _RecordingDispatcher())
-        request = OverrideRequest(kind=OverrideKind.RETENTION_PURGE, purge_token="anything")
+        token = run(service.preview_retention(monitor_id)).token
+        request = OverrideRequest(kind=OverrideKind.RETENTION_PURGE, purge_token=token)
 
         run(service.submit(monitor_id, request))
 

@@ -29,7 +29,7 @@ async def dispatch_run(
 
     outcomes: list[SourceOutcome] = []
     for source in sources:
-        outcomes.append(await _collect_one(session_factory, fetch_client, run_id, source))
+        outcomes.append(await collect_one_source(session_factory, fetch_client, run_id, source))
 
     status = await run_service.finalise(run_id, outcomes, expected_volume=bool(sources))
     await evaluate_source_health(session_factory, run_id)
@@ -79,7 +79,7 @@ async def _run_downstream_pipeline(
     await run_daily_analytics(session_factory, monitor_id=monitor_id, run_date=run_date)
 
 
-async def _collect_one(session_factory, fetch_client, run_id, source) -> SourceOutcome:  # noqa: ANN001
+async def collect_one_source(session_factory, fetch_client, run_id, source) -> SourceOutcome:  # noqa: ANN001
     if source.source_name is not SourceName.PLAY:
         return SourceOutcome(
             source_id=source.id,

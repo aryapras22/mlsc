@@ -39,6 +39,11 @@ class OverrideOverlaps(RuntimeError):
         self.job_id = job_id
 
 
+class PurgeNotConfirmed(RuntimeError):
+    """Raised when a retention purge is submitted with no preview token, or
+    one that does not match the cutoff and count it was issued for."""
+
+
 class OverrideDispatcher(Protocol):
     """Injected so this service never imports Celery directly (design.md,
     "Dependencies, injected")."""
@@ -82,6 +87,9 @@ class OverrideService:
         self._clock = clock or _SystemClock()
 
     async def submit(self, monitor_id: uuid.UUID, request: OverrideRequest) -> uuid.UUID:
+        if request.kind is OverrideKind.RETENTION_PURGE:
+            await self._check_purge_confirmed(monitor_id, request.purge_token)
+
         async with self._session_factory() as session:
             existing = await session.execute(
                 select(OverrideJob).where(
@@ -109,6 +117,17 @@ class OverrideService:
         return job_id
 
     async def preview_retention(self, monitor_id: uuid.UUID) -> RetentionPreviewResponse:
+        cutoff, count = await self._retention_state(monitor_id)
+        return RetentionPreviewResponse(count=count, token=preview_token(monitor_id, cutoff, count))
+
+    async def _check_purge_confirmed(self, monitor_id: uuid.UUID, token: str | None) -> None:
+        if token is None:
+            raise PurgeNotConfirmed(str(monitor_id))
+        cutoff, count = await self._retention_state(monitor_id)
+        if token != preview_token(monitor_id, cutoff, count):
+            raise PurgeNotConfirmed(str(monitor_id))
+
+    async def _retention_state(self, monitor_id: uuid.UUID) -> tuple[date, int]:
         async with self._session_factory() as session:
             monitor = await session.get(Monitor, monitor_id)
             cutoff = self._clock.today() - timedelta(days=monitor.retention_days)
@@ -120,4 +139,4 @@ class OverrideService:
             )
             count = result.scalar_one()
 
-        return RetentionPreviewResponse(count=count, token=preview_token(monitor_id, cutoff, count))
+        return cutoff, count
