@@ -14,9 +14,45 @@ enqueues from inside `OverrideService.submit`, matching the same pattern
 from __future__ import annotations
 
 import asyncio
+import logging
+import uuid
+from collections.abc import Awaitable, Callable
 from datetime import date
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from mlsc.db.models import Monitor, MonitorStatus
 from mlsc.worker import app
+
+logger = logging.getLogger(__name__)
+
+
+async def _for_each_active_monitor(
+    session_factory: async_sessionmaker[AsyncSession],
+    work: Callable[[uuid.UUID], Awaitable[None]],
+) -> None:
+    """Requirement 8/9: loop every active, non-paused, non-archived monitor,
+    calling ``work`` for each. One monitor's ``work`` raising is logged with
+    its monitor id and the loop continues, matching how `rollup_daily` and
+    `evaluate_alerts` already treat one bad unit inside a batch
+    (design.md, "Failure strategy").
+
+    Only this function's own session loads the monitor list; ``work`` opens
+    and closes its own session per monitor, matching every function it will
+    call (design.md, "Dependencies, injected")."""
+    async with session_factory() as session:
+        result = await session.execute(
+            select(Monitor.id).where(Monitor.status == MonitorStatus.ACTIVE)
+        )
+        monitor_ids = list(result.scalars().all())
+
+    for monitor_id in monitor_ids:
+        try:
+            await work(monitor_id)
+        except Exception:  # noqa: BLE001 - one bad monitor must not abort the batch
+            logger.exception("cadence work failed for monitor %s", monitor_id)
+            continue
 
 
 @app.task(name="mlsc.run_monitor")
