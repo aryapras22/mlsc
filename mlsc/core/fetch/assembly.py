@@ -19,6 +19,7 @@ from mlsc.core.fetch.cache import ResponseCache
 from mlsc.core.fetch.client import FetchClient
 from mlsc.core.fetch.throttle import HostBudget, Throttle
 from mlsc.core.fetch.transports import ImpersonatingTransport, PlainTransport
+from mlsc.core.fetch.webhook import WebhookSender
 
 
 def build_fetch_client(redis: Redis, settings: FetchClientSettings | None = None) -> FetchClient:
@@ -51,4 +52,38 @@ def build_fetch_client(redis: Redis, settings: FetchClientSettings | None = None
         host_budget=host_budget,
         max_transport_retries=settings.max_transport_retries,
         retry_backoff_seconds=settings.retry_backoff_seconds,
+    )
+
+
+def build_webhook_sender(redis: Redis, settings: FetchClientSettings | None = None) -> WebhookSender:
+    """Assembles the ``WebhookSender`` every delivery task shares, from the
+    same breaker and throttle settings ``build_fetch_client`` uses, so a
+    webhook target gets the same politeness and circuit-breaking as a
+    scraped host (mlsc/core/fetch/webhook.py, module docstring).
+
+    A plain transport only: a webhook is a POST to a user-configured URL,
+    never a host that needs TLS impersonation to answer.
+    """
+    settings = settings or load_fetch_client_settings()
+
+    breaker = Breaker(
+        redis,
+        BreakerSettings(
+            failure_threshold=settings.breaker_failure_threshold,
+            cooldown_seconds=settings.breaker_cooldown_seconds,
+        ),
+    )
+    throttle = Throttle(redis)
+    host_budget = HostBudget(
+        capacity=settings.host_budget_capacity,
+        refill_rate_per_second=settings.host_budget_refill_rate_per_second,
+        jitter_low_seconds=settings.host_budget_jitter_low_seconds,
+        jitter_high_seconds=settings.host_budget_jitter_high_seconds,
+    )
+
+    return WebhookSender(
+        transport=PlainTransport(httpx.AsyncClient()),
+        breaker=breaker,
+        throttle=throttle,
+        host_budget=host_budget,
     )

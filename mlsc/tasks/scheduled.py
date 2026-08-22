@@ -124,3 +124,27 @@ def run_override(job_id: str) -> None:
             llm_router=llm_router,
         )
     )
+
+
+@app.task(name="mlsc.run_alert_delivery")
+def run_alert_delivery() -> int:
+    """Celery entrypoint. Builds its own dependencies rather than importing a
+    process-wide singleton, matching the pattern in `run_override` above.
+
+    No monitor argument: a recurring sweep across every pending or
+    previously failed delivery, independent of any one monitor's own
+    collection schedule (design.md, "Success path": "already fans across
+    every rule itself")."""
+    from mlsc.bootstrap import build_redis_client
+    from mlsc.config import load_settings
+    from mlsc.core.fetch.assembly import build_webhook_sender
+    from mlsc.db.session import build_engine, build_session_factory
+    from mlsc.tasks.alerts import deliver_pending
+
+    settings = load_settings()
+    engine = build_engine(settings.postgres)
+    session_factory = build_session_factory(engine)
+    redis = build_redis_client(settings.redis)
+    sender = build_webhook_sender(redis)
+
+    return asyncio.run(deliver_pending(session_factory, sender=sender))
