@@ -7,15 +7,16 @@ nobody could attribute (design.md, "Failure strategy").
 
 from __future__ import annotations
 
+import hashlib
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from mlsc.db.models import OverrideJob, OverrideKind, OverrideStatus
-from mlsc.schemas.overrides import OverrideRequest
+from mlsc.db.models import Document, Monitor, OverrideJob, OverrideKind, OverrideStatus
+from mlsc.schemas.overrides import OverrideRequest, RetentionPreviewResponse
 
 _IN_FLIGHT = (OverrideStatus.PENDING, OverrideStatus.RUNNING)
 
@@ -43,6 +44,16 @@ class OverrideDispatcher(Protocol):
     "Dependencies, injected")."""
 
     def dispatch_override(self, job_id: uuid.UUID) -> None: ...
+
+
+def preview_token(monitor_id: uuid.UUID, cutoff: date, count: int) -> str:
+    """Binds a preview to the count it was issued for, so a stale token from
+    an hour ago cannot authorise today's larger purge (design.md, "Trust
+    boundary"). Not a security control — the operator who fetched the
+    preview is the same operator submitting it — just a staleness check."""
+
+    payload = f"{monitor_id}:{cutoff.isoformat()}:{count}"
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def _parameters_for(request: OverrideRequest) -> dict[str, Any]:
@@ -96,3 +107,15 @@ class OverrideService:
 
         self._dispatcher.dispatch_override(job_id)
         return job_id
+
+    async def preview_retention(self, monitor_id: uuid.UUID) -> RetentionPreviewResponse:
+        async with self._session_factory() as session:
+            monitor = await session.get(Monitor, monitor_id)
+            cutoff = self._clock.today() - timedelta(days=monitor.retention_days)
+            result = await session.execute(
+                select(func.count()).select_from(Document).where(
+                    Document.monitor_id == monitor_id, Document.published_at < cutoff
+                )
+            )
+            count = result.scalar_one()
+        return RetentionPreviewResponse(count=count, token=preview_token(monitor_id, cutoff, count))
