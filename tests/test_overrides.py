@@ -36,7 +36,10 @@ from mlsc.db.models import (
     SourceName,
     TargetType,
 )
+from mlsc.llm.base import Completion
+from mlsc.llm.router import LlmRouter, Tier
 from mlsc.pipeline.enrich import Embedder, SentimentScorer
+from mlsc.pipeline.intent import IntentBatchResult, IntentResult
 from mlsc.pipeline.normalize import hash_author, hash_content
 from mlsc.pipeline.stages import Stage
 from mlsc.schemas.monitors import MonitorCreateRequest
@@ -53,6 +56,22 @@ class FixedEmbedder(Embedder):
 
     def encode(self, texts: list[str]) -> list[list[float]]:
         return [[0.1] * 384 for _ in texts]
+
+
+class FakeProvider:
+    """Returns one queued completion per call, recording how many it served."""
+
+    def __init__(self, completions: list[Completion]) -> None:
+        self._completions = list(completions)
+        self.calls = 0
+
+    async def complete(self, *, prompt: str, schema: type, prompt_version: str) -> Completion:
+        self.calls += 1
+        return self._completions.pop(0)
+
+
+def _make_router(provider: FakeProvider) -> LlmRouter:
+    return LlmRouter({Tier.INTENT: provider, Tier.LABELING: provider, Tier.INSIGHT: provider})
 
 LOCAL_DATABASE_URL = "postgresql+asyncpg://mlsc:mlsc@localhost:55433/mlsc"
 
@@ -249,6 +268,7 @@ class TestStageRerun:
         monitor_id = run(_make_monitor(session_factory))
         source_id = run(_attach_play_source(session_factory, monitor_id))
         document_id = run(_seed_ledgered_document(session_factory, monitor_id, source_id))
+        router = _make_router(FakeProvider([]))
 
         run(
             _run_stage_rerun(
@@ -257,6 +277,7 @@ class TestStageRerun:
                 stage=Stage.EMBED,
                 embedder=FixedEmbedder(),
                 sentiment_scorer=SentimentScorer(),
+                llm_router=router,
             )
         )
         after_embed = run(_load_enrichment(session_factory, document_id))
@@ -270,6 +291,7 @@ class TestStageRerun:
                 stage=Stage.SENTIMENT,
                 embedder=FixedEmbedder(),
                 sentiment_scorer=SentimentScorer(),
+                llm_router=router,
             )
         )
 
@@ -279,6 +301,38 @@ class TestStageRerun:
         assert status is OverrideStatus.COMPLETE
         assert outcome["documents_reenriched"] == 1
         assert outcome["dates_recomputed"] == [date.today().isoformat()]
+
+    def test_a_rerun_of_the_intent_stage_actually_classifies_through_the_router(self, session_factory) -> None:
+        """The gap this covers: `enrich_documents` gates the intent stage on
+        `llm_router is not None`, so a stage re-run built without a router
+        would silently skip intent instead of re-running it."""
+        monitor_id = run(_make_monitor(session_factory))
+        source_id = run(_attach_play_source(session_factory, monitor_id))
+        document_id = run(_seed_ledgered_document(session_factory, monitor_id, source_id))
+        completion = Completion(
+            value=IntentBatchResult(
+                results=[IntentResult(document_id=str(document_id), intent="praise", confidence=0.9)]
+            ),
+            provider="fake", model="fake-model", prompt_version="v1",
+        )
+        provider = FakeProvider([completion])
+        router = _make_router(provider)
+
+        status, outcome = run(
+            _run_stage_rerun(
+                session_factory,
+                monitor_id=monitor_id,
+                stage=Stage.INTENT,
+                embedder=FixedEmbedder(),
+                sentiment_scorer=SentimentScorer(),
+                llm_router=router,
+            )
+        )
+
+        assert status is OverrideStatus.COMPLETE
+        assert provider.calls == 1
+        enrichment = run(_load_enrichment(session_factory, document_id))
+        assert enrichment.intent == "praise"
 
 
 class TestBackfillWindow:
