@@ -157,6 +157,29 @@ class RunView(BaseModel):
     finished_at: datetime | None
 
 
+class RunSummaryView(BaseModel):
+    id: uuid.UUID
+    run_date: date
+    status: str
+    is_backfill: bool
+
+
+class RunSourceStatsView(BaseModel):
+    """One source's outcome within a run, for the progress panel's poll
+    (on-demand-collection design.md, "Domain shapes": `RunProgress`)."""
+
+    monitor_source_id: uuid.UUID
+    attempted: int
+    fetched: int
+    kept: int
+    quota: int
+    quota_outcome: str
+    validation_failed: bool
+    error: str | None
+
+    model_config = {"from_attributes": True}
+
+
 class EntityComparisonRow(BaseModel):
     entity_id: str
     doc_count: int

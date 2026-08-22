@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from mlsc.application.runs import MonitorNotRunnable, NoSourcesConfigured, RunAlreadyActive
 from mlsc.repositories.runs import RunRepository
-from mlsc.schemas.metrics import RunView
+from mlsc.schemas.metrics import RunSourceStatsView, RunSummaryView, RunView
 
 router = APIRouter(tags=["runs"])
 
@@ -61,11 +61,33 @@ async def get_run(run_id: uuid.UUID, request: Request) -> RunView:
     )
 
 
-@router.get("/monitors/{monitor_id}/runs")
-async def list_runs(monitor_id: uuid.UUID, request: Request) -> list[dict]:
+@router.get("/monitors/{monitor_id}/runs", response_model=list[RunSummaryView])
+async def list_runs(monitor_id: uuid.UUID, request: Request) -> list[RunSummaryView]:
     async with request.app.state.startup.session_factory() as session:
         runs = await RunRepository(session).history_for_monitor(monitor_id)
     return [
-        {"id": r.id, "run_date": r.run_date, "status": r.status, "is_backfill": r.is_backfill}
+        RunSummaryView(id=r.id, run_date=r.run_date, status=r.status.value, is_backfill=r.is_backfill)
         for r in runs
+    ]
+
+
+@router.get("/runs/{run_id}/stats", response_model=list[RunSourceStatsView])
+async def get_run_stats(run_id: uuid.UUID, request: Request) -> list[RunSourceStatsView]:
+    """Requirement 5: each source's outcome while a run is in flight — the
+    other half of `RunProgress` alongside `GET /runs/{id}` (design.md,
+    "Domain shapes")."""
+    async with request.app.state.startup.session_factory() as session:
+        stats = await RunRepository(session).stats_for_run(run_id)
+    return [
+        RunSourceStatsView(
+            monitor_source_id=s.monitor_source_id,
+            attempted=s.attempted,
+            fetched=s.fetched,
+            kept=s.kept,
+            quota=s.quota,
+            quota_outcome=s.quota_outcome.value,
+            validation_failed=s.validation_failed,
+            error=s.error,
+        )
+        for s in stats
     ]

@@ -79,6 +79,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Stats
+         * @description Requirement 5: each source's outcome while a run is in flight — the
+         *     other half of `RunProgress` alongside `GET /runs/{id}` (design.md,
+         *     "Domain shapes").
+         */
+        get: operations["get_run_stats_runs__run_id__stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/monitors/{monitor_id}/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Sources */
+        get: operations["list_sources_monitors__monitor_id__sources_get"];
+        put?: never;
+        /** Attach Source */
+        post: operations["attach_source_monitors__monitor_id__sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sources/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Source */
+        patch: operations["update_source_sources__source_id__patch"];
+        trace?: never;
+    };
     "/monitors/{monitor_id}/overview": {
         parameters: {
             query?: never;
@@ -519,6 +576,61 @@ export interface components {
             /** Projected */
             projected: boolean;
         };
+        /** MonitorSourceCreateRequest */
+        MonitorSourceCreateRequest: {
+            source_name: components["schemas"]["SourceName"];
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Daily Quota */
+            daily_quota: number;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /** MonitorSourceResponse */
+        MonitorSourceResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Monitor Id
+             * Format: uuid
+             */
+            monitor_id: string;
+            source_name: components["schemas"]["SourceName"];
+            /** Instance Key */
+            instance_key: string;
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Daily Quota */
+            daily_quota: number;
+            /** Enabled */
+            enabled: boolean;
+            /** Last External Id */
+            last_external_id: string | null;
+            /** Last Published At */
+            last_published_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** MonitorSourceUpdateRequest */
+        MonitorSourceUpdateRequest: {
+            /** Daily Quota */
+            daily_quota?: number | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
         /**
          * MonitorStatus
          * @description A monitor's lifecycle. There is no terminal success state (handoff §1.2).
@@ -564,6 +676,49 @@ export interface components {
          * @enum {string}
          */
         ReadAlertKind: "product" | "scraper";
+        /**
+         * RunSourceStatsView
+         * @description One source's outcome within a run, for the progress panel's poll
+         *     (on-demand-collection design.md, "Domain shapes": `RunProgress`).
+         */
+        RunSourceStatsView: {
+            /**
+             * Monitor Source Id
+             * Format: uuid
+             */
+            monitor_source_id: string;
+            /** Attempted */
+            attempted: number;
+            /** Fetched */
+            fetched: number;
+            /** Kept */
+            kept: number;
+            /** Quota */
+            quota: number;
+            /** Quota Outcome */
+            quota_outcome: string;
+            /** Validation Failed */
+            validation_failed: boolean;
+            /** Error */
+            error: string | null;
+        };
+        /** RunSummaryView */
+        RunSummaryView: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Run Date
+             * Format: date
+             */
+            run_date: string;
+            /** Status */
+            status: string;
+            /** Is Backfill */
+            is_backfill: boolean;
+        };
         /** RunTriggerRequest */
         RunTriggerRequest: {
             /** Run Date */
@@ -828,9 +983,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["RunSummaryView"][];
                 };
             };
             /** @description Validation Error */
@@ -897,6 +1050,138 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_stats_runs__run_id__stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSourceStatsView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sources_monitors__monitor_id__sources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                monitor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorSourceResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    attach_source_monitors__monitor_id__sources_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                monitor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MonitorSourceCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorSourceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_source_sources__source_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MonitorSourceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorSourceResponse"];
                 };
             };
             /** @description Validation Error */
