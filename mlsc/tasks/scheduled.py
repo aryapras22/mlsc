@@ -261,3 +261,26 @@ def run_monthly_refit() -> None:
         )
 
     asyncio.run(_for_each_active_monitor(session_factory, work))
+
+
+@app.task(name="mlsc.run_retention_sweep")
+def run_retention_sweep() -> None:
+    """Celery entrypoint. Builds its own dependencies rather than importing a
+    process-wide singleton, matching the pattern in `run_monthly_refit`
+    above.
+
+    No monitor argument: fires daily across every active monitor's
+    retention window, independent of any one monitor's own collection
+    schedule (design.md, "Success path")."""
+    from mlsc.config import load_settings
+    from mlsc.db.session import build_engine, build_session_factory
+    from mlsc.tasks.retention import enforce_retention
+
+    settings = load_settings()
+    engine = build_engine(settings.postgres)
+    session_factory = build_session_factory(engine)
+
+    async def work(monitor_id: uuid.UUID) -> None:
+        await enforce_retention(session_factory, monitor_id)
+
+    asyncio.run(_for_each_active_monitor(session_factory, work))

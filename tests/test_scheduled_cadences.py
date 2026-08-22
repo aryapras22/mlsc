@@ -159,3 +159,31 @@ class TestRunMonthlyRefit:
         scheduled.run_monthly_refit()
 
         assert calls == [active_id]
+
+
+class TestRunRetentionSweep:
+    def test_enforces_retention_per_active_monitor(
+        self, session_factory, monkeypatch
+    ) -> None:  # noqa: ANN001
+        active_id = run(_make_monitor(session_factory, status=MonitorStatus.ACTIVE))
+        run(_make_monitor(session_factory, status=MonitorStatus.PAUSED))
+
+        calls: list[uuid.UUID] = []
+
+        async def fake_enforce_retention(_session_factory, monitor_id):
+            calls.append(monitor_id)
+
+        # The task builds its own engine/session factory from settings; the
+        # test substitutes the fixture's factory rather than reaching a real
+        # managed Postgres endpoint from configuration.
+        stub_settings = SimpleNamespace(postgres=None)
+        monkeypatch.setattr("mlsc.config.load_settings", lambda: stub_settings)
+        monkeypatch.setattr("mlsc.db.session.build_engine", lambda _postgres: object())
+        monkeypatch.setattr(
+            "mlsc.db.session.build_session_factory", lambda _engine: session_factory
+        )
+        monkeypatch.setattr("mlsc.tasks.retention.enforce_retention", fake_enforce_retention)
+
+        scheduled.run_retention_sweep()
+
+        assert calls == [active_id]
