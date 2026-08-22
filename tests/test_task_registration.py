@@ -13,6 +13,11 @@ _ENQUEUED_TASK_NAMES = {
     "mlsc.run_monitor",  # mlsc/beat.py, MonitorAwareScheduler's projected entry
     "mlsc.dispatch_run",  # mlsc/tasks/celery_dispatcher.py, CeleryDispatcher.dispatch_run
     "mlsc.run_override",  # mlsc/tasks/celery_dispatcher.py, CeleryDispatcher.dispatch_override
+    "mlsc.run_alert_delivery",  # mlsc/beat.py, MonitorAwareScheduler's STATIC_SCHEDULE
+    "mlsc.run_weekly_discovery",  # mlsc/beat.py, MonitorAwareScheduler's STATIC_SCHEDULE
+    "mlsc.run_monthly_refit",  # mlsc/beat.py, MonitorAwareScheduler's STATIC_SCHEDULE
+    "mlsc.run_retention_sweep",  # mlsc/beat.py, MonitorAwareScheduler's STATIC_SCHEDULE
+    "mlsc.run_stability_snapshot",  # mlsc/beat.py, MonitorAwareScheduler's STATIC_SCHEDULE
 }
 
 
