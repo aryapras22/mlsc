@@ -17,14 +17,17 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 
 from mlsc.application.monitors import MonitorService
 from mlsc.application.runs import (
+    NoSourcesConfigured,
     RunAlreadyActive,
     RunService,
     SourceOutcome,
     SourceResult,
 )
+from mlsc.application.sources import MonitorSourceService
 from mlsc.core.locks import RunLock
-from mlsc.db.models import Base, MonitorStatus, RunStatus, TargetType
+from mlsc.db.models import Base, MonitorStatus, RunStatus, SourceName, TargetType
 from mlsc.schemas.monitors import MonitorCreateRequest
+from mlsc.schemas.sources import MonitorSourceCreateRequest
 
 LOCAL_DATABASE_URL = "postgresql+asyncpg://mlsc:mlsc@localhost:55433/mlsc"
 
@@ -101,7 +104,36 @@ async def _make_monitor(session_factory) -> uuid.UUID:  # noqa: ANN001
             retention_days=90,
         )
     )
+    await MonitorSourceService(session_factory).attach(
+        monitor.id,
+        MonitorSourceCreateRequest(
+            source_name=SourceName.PLAY,
+            config={"package_id": "com.roblox.client"},
+            daily_quota=10,
+        ),
+    )
     return monitor.id
+
+
+class TestNoSourcesConfigured:
+    def test_start_refuses_a_monitor_with_no_enabled_source(
+        self, session_factory, run_service
+    ) -> None:
+        monitor = run(
+            MonitorService(session_factory).create(
+                MonitorCreateRequest(
+                    name="Roblox",
+                    target_type=TargetType.PRODUCT,
+                    seed={"identifiers": ["com.roblox.client"]},
+                    cron_expression="0 3 * * *",
+                    timezone="UTC",
+                    retention_days=90,
+                )
+            )
+        )
+
+        with pytest.raises(NoSourcesConfigured):
+            run(run_service.start(monitor.id, date.today()))
 
 
 class TestSingleRunPerDate:

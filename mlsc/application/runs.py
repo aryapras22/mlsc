@@ -100,6 +100,14 @@ class RunService:
             if monitor is None or monitor.status is not MonitorStatus.ACTIVE:
                 raise MonitorNotRunnable(str(monitor_id))
 
+            has_enabled_source = await session.execute(
+                select(MonitorSource.id)
+                .where(MonitorSource.monitor_id == monitor_id, MonitorSource.enabled.is_(True))
+                .limit(1)
+            )
+            if has_enabled_source.scalar_one_or_none() is None:
+                raise NoSourcesConfigured(str(monitor_id))
+
             result = await session.execute(
                 select(IngestionRun).where(
                     IngestionRun.monitor_id == monitor_id,

@@ -8,7 +8,7 @@ from datetime import date
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
-from mlsc.application.runs import MonitorNotRunnable, RunAlreadyActive
+from mlsc.application.runs import MonitorNotRunnable, NoSourcesConfigured, RunAlreadyActive
 from mlsc.repositories.runs import RunRepository
 from mlsc.schemas.metrics import RunView
 
@@ -38,6 +38,10 @@ async def trigger_run(
         run_id = await run_service.start(monitor_id, run_date, is_backfill=body.is_backfill)
     except MonitorNotRunnable:
         raise HTTPException(status.HTTP_409_CONFLICT, "monitor is not active") from None
+    except NoSourcesConfigured:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"monitor {monitor_id} has no enabled source"
+        ) from None
     except RunAlreadyActive as active:
         return RunTriggerResponse(run_id=active.run_id)
     return RunTriggerResponse(run_id=run_id)

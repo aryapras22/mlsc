@@ -21,6 +21,7 @@ from mlsc.application import metrics_view
 from mlsc.application.filters import FilterUnknown, resolve_topic
 from mlsc.application.monitors import MonitorService
 from mlsc.application.runs import RunService, SourceOutcome, SourceResult
+from mlsc.application.sources import MonitorSourceService
 from mlsc.core.fetch.webhook import WebhookUnreachable
 from mlsc.core.locks import RunLock
 from mlsc.db.models import (
@@ -43,6 +44,7 @@ from mlsc.db.models import (
 from mlsc.schemas.alerts import AlertRuleCreateRequest
 from mlsc.schemas.metrics import Metric
 from mlsc.schemas.monitors import MonitorCreateRequest
+from mlsc.schemas.sources import MonitorSourceCreateRequest
 from mlsc.tasks.alerts import deliver_pending, evaluate_alerts
 
 LOCAL_DATABASE_URL = "postgresql+asyncpg://mlsc:mlsc@localhost:55433/mlsc"
@@ -216,6 +218,16 @@ class TestRunTrigger:
         """Requirement 4/5: starting a run returns an id and does no work in
         the request — finalisation is a separate call the caller controls."""
         monitor_id = run(_make_monitor(session_factory))
+        run(
+            MonitorSourceService(session_factory).attach(
+                monitor_id,
+                MonitorSourceCreateRequest(
+                    source_name=SourceName.PLAY,
+                    config={"package_id": "com.roblox.client"},
+                    daily_quota=10,
+                ),
+            )
+        )
 
         class NullDispatcher:
             def __init__(self) -> None:
