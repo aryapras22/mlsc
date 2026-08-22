@@ -1,0 +1,15 @@
+.git
+.gitignore
+.kiro
+.pytest_cache
+__pycache__
+**/__pycache__
+*.py[cod]
+*.egg-info
+docs
+frontend
+scripts
+tests
+.env
+.env.*
+!.env.example

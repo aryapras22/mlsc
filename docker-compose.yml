@@ -1,19 +1,43 @@
-# Local development dependencies only. These service names, ports, and credentials are
-# not a production or deployment contract, and no process may treat them as a fallback:
-# every endpoint is supplied to the application through runtime configuration.
+# The whole application for local use: managed dependencies, the three Python
+# processes, and the built frontend. These service names, ports, and credentials are
+# not a production or deployment contract, and no process may treat them as a
+# fallback: every endpoint is supplied to the application through runtime
+# configuration.
 #
 # Required variables come from an explicit local environment file or shell settings; the
 # `:?` form fails Compose instead of defaulting an endpoint or credential.
 #
-# PostgreSQL 16.15 / TimescaleDB 2.29.1 / pgvector 0.8.3 are the releases selected by the
-# compatibility preflight. Redis has no preflight-verified server release, so only its
-# major line is pinned here.
+# PostgreSQL 16.14 / TimescaleDB 2.29.1 — the preflight names PostgreSQL 16.15, but
+# timescaledb-ha publishes no pg16.15 tag, so this is the same image release
+# docker-compose.local.yml already pins, and it ships pgvector 0.8.6 rather than the
+# preflight's 0.8.3. Redis has no preflight-verified server release, so only its major
+# line is pinned here.
 
-name: mlsc-local
+name: mlsc
+# A distinct Compose project from docker-compose.local.yml's `mlsc-local`, so the two
+# files never share a volume or fight over one container.
+
+x-app-image: &app-image
+  build:
+    context: .
+  image: mlsc-app:dev
+
+x-app-env: &app-env
+  MLSC_POSTGRES_HOST: postgres
+  MLSC_POSTGRES_PORT: "5432"
+  MLSC_POSTGRES_DATABASE: ${MLSC_LOCAL_POSTGRES_DB:?set MLSC_LOCAL_POSTGRES_DB in your local env file}
+  MLSC_POSTGRES_USER: ${MLSC_LOCAL_POSTGRES_USER:?set MLSC_LOCAL_POSTGRES_USER in your local env file}
+  MLSC_POSTGRES_PASSWORD: ${MLSC_LOCAL_POSTGRES_PASSWORD:?set MLSC_LOCAL_POSTGRES_PASSWORD in your local env file}
+  MLSC_POSTGRES_SSL_MODE: disable
+  MLSC_REDIS_HOST: redis
+  MLSC_REDIS_PORT: "6379"
+  MLSC_REDIS_PASSWORD: ${MLSC_LOCAL_REDIS_PASSWORD:?set MLSC_LOCAL_REDIS_PASSWORD in your local env file}
+  MLSC_REDIS_USE_TLS: "false"
+  CELERY_BROKER_URL: redis://:${MLSC_LOCAL_REDIS_PASSWORD:?set MLSC_LOCAL_REDIS_PASSWORD in your local env file}@redis:6379/0
 
 services:
   postgres:
-    image: timescale/timescaledb-ha:pg16.15-ts2.29.1
+    image: timescale/timescaledb-ha:pg16.14-ts2.29.1
     labels:
       com.mlsc.scope: local-development-only
     environment:
@@ -23,7 +47,8 @@ services:
     ports:
       - "${MLSC_LOCAL_POSTGRES_PORT:?set MLSC_LOCAL_POSTGRES_PORT in your local env file}:5432"
     volumes:
-      - postgres-data:/home/postgres/pgdata/data
+      - postgres-data:/home/postgres/pgdata
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test:
         - CMD-SHELL
@@ -54,6 +79,89 @@ services:
     environment:
       REDIS_PASSWORD: ${MLSC_LOCAL_REDIS_PASSWORD:?set MLSC_LOCAL_REDIS_PASSWORD in your local env file}
 
+  # Alembic owns every schema object (C8), so this must finish before any process that
+  # reads or writes one starts.
+  migrate:
+    <<: *app-image
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *app-env
+      MLSC_DATABASE_URL: postgresql+asyncpg://${MLSC_LOCAL_POSTGRES_USER}:${MLSC_LOCAL_POSTGRES_PASSWORD}@postgres:5432/${MLSC_LOCAL_POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app-image
+    environment: *app-env
+    ports:
+      - "${MLSC_LOCAL_API_PORT:?set MLSC_LOCAL_API_PORT in your local env file}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json')"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # --include is required because mlsc/worker.py registers no task modules itself.
+  worker:
+    <<: *app-image
+    command:
+      - celery
+      - -A
+      - mlsc.worker
+      - worker
+      - --queues=io
+      - --loglevel=info
+      - --include=mlsc.tasks.scheduled
+    environment: *app-env
+    volumes:
+      - model-cache:/opt/model-cache
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  # MonitorAwareScheduler re-projects the schedule from the database on every tick, so
+  # Beat needs the database as well as the broker.
+  beat:
+    <<: *app-image
+    command:
+      - celery
+      - -A
+      - mlsc.worker
+      - beat
+      - --scheduler=mlsc.beat.MonitorAwareScheduler
+      - --loglevel=info
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${MLSC_LOCAL_FRONTEND_ORIGIN:?set MLSC_LOCAL_FRONTEND_ORIGIN in your local env file}
+    image: mlsc-frontend:dev
+    ports:
+      - "${MLSC_LOCAL_FRONTEND_PORT:?set MLSC_LOCAL_FRONTEND_PORT in your local env file}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   postgres-data:
   redis-data:
+  model-cache:
