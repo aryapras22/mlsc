@@ -16,15 +16,20 @@ export function MonitorList() {
       <LoadStateView
         state={query.data ?? { status: "loading" }}
         render={(monitors) => (
-          <ul className="space-y-2">
-            {monitors.map((monitor) => (
-              <li key={monitor.id}>
-                <Link className="underline" to={`/monitors/${monitor.id}`}>
-                  {monitor.name}
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="space-y-2">
+              {monitors.map((monitor) => (
+                <li key={monitor.id}>
+                  <Link className="underline" to={`/monitors/${monitor.id}`}>
+                    {monitor.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            {monitors.length === 0 && (
+              <p className="text-muted-foreground text-sm">No monitors yet.</p>
+            )}
+          </>
         )}
       />
     </div>
