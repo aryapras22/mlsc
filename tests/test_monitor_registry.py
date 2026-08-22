@@ -20,10 +20,11 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from mlsc.application.monitors import MonitorService
-from mlsc.beat import SchedulePlanner
+from mlsc.beat import STATIC_SCHEDULE, MonitorAwareScheduler, SchedulePlanner
 from mlsc.db.models import Base, MonitorStatus, ScheduleRegistration, TargetType
 from mlsc.repositories.monitors import MonitorNotFound
 from mlsc.schemas.monitors import MonitorCreateRequest, MonitorUpdateRequest
+from mlsc.worker import app
 
 LOCAL_DATABASE_URL = "postgresql+asyncpg://mlsc:mlsc@localhost:55433/mlsc"
 
@@ -224,3 +225,21 @@ class TestProjectionDeterminism:
         entries = run(planner.project())
 
         assert entries == {}
+
+
+class TestStaticScheduleSurvivesRepeatedMerge:
+    def test_static_entries_survive_two_consecutive_syncs(
+        self, planner: SchedulePlanner
+    ) -> None:
+        """merge_inplace (celery.beat.Scheduler) pops any schedule key absent
+        from what it's given, so the five static cadence entries must be
+        re-included on every tick, not just the first, or they vanish on the
+        second (design.md, "Success path": the five fixed cadences)."""
+        scheduler = MonitorAwareScheduler(app, planner=planner, lazy=True)
+        try:
+            scheduler._sync_from_planner()
+            scheduler._sync_from_planner()
+
+            assert set(STATIC_SCHEDULE) <= set(scheduler.schedule)
+        finally:
+            scheduler.close()

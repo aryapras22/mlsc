@@ -16,10 +16,45 @@ from croniter import croniter
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from celery.beat import Scheduler
-from celery.schedules import crontab
+from celery.schedules import crontab, schedule
 from mlsc.repositories.monitors import ScheduleRegistrationRepository
 
 logger = logging.getLogger(__name__)
+
+# The five multi-monitor cadences from design.md's "Success path", none of
+# which take a monitor argument. Times are spread across off-peak UTC hours
+# so they don't collide with each other or with a monitor's own collection
+# schedule: retention daily at 02:00, discovery weekly Sunday 03:00, snapshot
+# weekly Sunday 04:00, refit monthly on the 1st at 05:00. Alert delivery is
+# the one interval-based entry, every 15 minutes, since pending deliveries
+# need to reach a terminal state well within a day (requirement 3).
+STATIC_SCHEDULE: dict[str, dict[str, object]] = {
+    "cadence:alert-delivery": {
+        "task": "mlsc.run_alert_delivery",
+        "schedule": schedule(run_every=900),
+        "args": (),
+    },
+    "cadence:weekly-discovery": {
+        "task": "mlsc.run_weekly_discovery",
+        "schedule": crontab(minute=0, hour=3, day_of_week=0),
+        "args": (),
+    },
+    "cadence:monthly-refit": {
+        "task": "mlsc.run_monthly_refit",
+        "schedule": crontab(minute=0, hour=5, day_of_month=1),
+        "args": (),
+    },
+    "cadence:retention-sweep": {
+        "task": "mlsc.run_retention_sweep",
+        "schedule": crontab(minute=0, hour=2),
+        "args": (),
+    },
+    "cadence:stability-snapshot": {
+        "task": "mlsc.run_stability_snapshot",
+        "schedule": crontab(minute=0, hour=4, day_of_week=0),
+        "args": (),
+    },
+}
 
 
 class _TzAwareCrontab(crontab):
@@ -115,8 +150,12 @@ class MonitorAwareScheduler(Scheduler):
         return super().tick(*args, **kwargs)
 
     def _sync_from_planner(self) -> None:
-        entries = self._loop.run_until_complete(self._planner.project())
-        self.merge_inplace(entries)
+        # merge_inplace pops every schedule key not present in what's passed
+        # to it (celery.beat.Scheduler.merge_inplace), so the five static
+        # entries must be included on every tick, not just at setup time, or
+        # they are deleted on the tick after the one that added them.
+        dynamic_entries = self._loop.run_until_complete(self._planner.project())
+        self.merge_inplace({**STATIC_SCHEDULE, **dynamic_entries})
 
     def close(self) -> None:
         super().close()
