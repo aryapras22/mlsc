@@ -47,7 +47,7 @@ async def run_override(
     fetch_client: FetchClient,
     embedder: Embedder,
     sentiment_scorer: SentimentScorer,
-    llm_router: LlmRouter | None = None,
+    llm_router: LlmRouter,
 ) -> None:
     async with session_factory() as session:
         job = await session.get(OverrideJob, job_id)
@@ -90,7 +90,7 @@ async def _run_stage_rerun(
     stage: Stage,
     embedder: Embedder,
     sentiment_scorer: SentimentScorer,
-    llm_router: LlmRouter | None = None,
+    llm_router: LlmRouter,
 ) -> tuple[OverrideStatus, dict[str, Any]]:
     async with session_factory() as session:
         monitor = await session.get(Monitor, monitor_id)
