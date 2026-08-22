@@ -120,6 +120,15 @@ class OverrideService:
         cutoff, count = await self._retention_state(monitor_id)
         return RetentionPreviewResponse(count=count, token=preview_token(monitor_id, cutoff, count))
 
+    async def list_for_monitor(self, monitor_id: uuid.UUID) -> list[OverrideJob]:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(OverrideJob)
+                .where(OverrideJob.monitor_id == monitor_id)
+                .order_by(OverrideJob.submitted_at.desc())
+            )
+            return list(result.scalars().all())
+
     async def _check_purge_confirmed(self, monitor_id: uuid.UUID, token: str | None) -> None:
         if token is None:
             raise PurgeNotConfirmed(str(monitor_id))
