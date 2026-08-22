@@ -3,7 +3,7 @@
  * fetch call directly (design.md, "Dependencies, injected").
  */
 
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPatch, apiPost } from "./client";
 import type { components } from "./generated-types";
 
 export type Overview = components["schemas"]["Overview"];
@@ -14,6 +14,10 @@ export type InsightView = components["schemas"]["InsightView"];
 export type DocumentPage = components["schemas"]["DocumentPage"];
 export type RunView = components["schemas"]["RunView"];
 export type Monitor = components["schemas"]["MonitorResponse"];
+export type MonitorCreate = components["schemas"]["MonitorCreateRequest"];
+export type MonitorUpdate = components["schemas"]["MonitorUpdateRequest"];
+export type MonitorStatus = components["schemas"]["MonitorStatus"];
+export type TargetType = components["schemas"]["TargetType"];
 export type EntityComparison = components["schemas"]["EntityComparison"];
 export type Metric = components["schemas"]["Metric"];
 export type SourceName = components["schemas"]["SourceName"];
@@ -30,6 +34,14 @@ export function getMonitor(monitorId: string): Promise<Monitor> {
 
 export function listMonitors(): Promise<Monitor[]> {
   return apiGet<Monitor[]>("/monitors");
+}
+
+export function createMonitor(body: MonitorCreate): Promise<Monitor> {
+  return apiPost<Monitor>("/monitors", body);
+}
+
+export function updateMonitor(monitorId: string, body: MonitorUpdate): Promise<Monitor> {
+  return apiPatch<Monitor>(`/monitors/${monitorId}`, body);
 }
 
 export function getOverview(monitorId: string, range: DateRangeParams): Promise<Overview> {

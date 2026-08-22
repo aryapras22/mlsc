@@ -1,5 +1,24 @@
 @import "tailwindcss";
 
+/* Only the tokens the pages actually reference. `text-muted-foreground` and every
+   border colour resolved to nothing before these existed, so the app rendered as
+   default text on the browser's own canvas. */
+@theme {
+  --color-background: #ffffff;
+  --color-foreground: #18181b;
+  --color-muted-foreground: #52525b;
+  --color-border: #d4d4d8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background: #0c0c0e;
+    --color-foreground: #f4f4f5;
+    --color-muted-foreground: #a1a1aa;
+    --color-border: #3f3f46;
+  }
+}
+
 :root {
   color-scheme: light dark;
 }
@@ -7,4 +26,14 @@
 body {
   margin: 0;
   font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+}
+
+/* Tailwind v4 defaults every border to currentColor, which would draw dividers and
+   inputs in the text colour. The pages use bare `border`, `border-b` and `border-t`. */
+*,
+::before,
+::after {
+  border-color: var(--color-border);
 }

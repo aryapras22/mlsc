@@ -18,6 +18,29 @@ export function useMonitor(monitorId: string) {
   });
 }
 
+export function useCreateMonitor() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: api.MonitorCreate) => api.createMonitor(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["monitors"] });
+    },
+  });
+}
+
+/** Also how a monitor is paused, resumed and archived — status is one more field. */
+export function useUpdateMonitor() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ monitorId, body }: { monitorId: string; body: api.MonitorUpdate }) =>
+      api.updateMonitor(monitorId, body),
+    onSuccess: (monitor) => {
+      queryClient.invalidateQueries({ queryKey: ["monitors"] });
+      queryClient.invalidateQueries({ queryKey: ["monitor", monitor.id] });
+    },
+  });
+}
+
 export function useOverview(monitorId: string, range: DateRangeParams): { data: LoadState<api.Overview> } {
   const query = useQuery({
     queryKey: ["overview", monitorId, range.start, range.end],

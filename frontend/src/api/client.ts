@@ -52,11 +52,11 @@ export async function apiGet<T>(path: string, params?: object): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function apiPost<T>(path: string, body: unknown): Promise<T> {
+async function sendJson<T>(method: "POST" | "PATCH", path: string, body: unknown): Promise<T> {
   let response: Response;
   try {
     response = await fetch(new URL(path, API_BASE_URL), {
-      method: "POST",
+      method,
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -73,6 +73,14 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
     return undefined as T;
   }
   return (await response.json()) as T;
+}
+
+export function apiPost<T>(path: string, body: unknown): Promise<T> {
+  return sendJson<T>("POST", path, body);
+}
+
+export function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  return sendJson<T>("PATCH", path, body);
 }
 
 /** A response shape that carries a typed absence alongside its data. */
