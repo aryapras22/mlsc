@@ -184,3 +184,49 @@ def run_alert_delivery() -> int:
     sender = build_webhook_sender(redis)
 
     return asyncio.run(deliver_pending(session_factory, sender=sender))
+
+
+@app.task(name="mlsc.run_weekly_discovery")
+def run_weekly_discovery() -> None:
+    """Celery entrypoint. Builds its own dependencies rather than importing a
+    process-wide singleton, matching the pattern in `run_alert_delivery` above.
+
+    No monitor argument: fires once weekly across every active monitor's
+    residue pool, independent of any one monitor's own collection schedule
+    (design.md, "Success path")."""
+    from mlsc.config import ConfigurationError, load_settings, load_topic_thresholds
+    from mlsc.db.session import build_engine, build_session_factory
+    from mlsc.llm.router import LlmRouter
+    from mlsc.pipeline.topics.discovery import UmapReducer
+    from mlsc.tasks.topics import discover_topics, mark_dormant_topics
+
+    settings = load_settings()
+    engine = build_engine(settings.postgres)
+    session_factory = build_session_factory(engine)
+    thresholds = load_topic_thresholds()
+    reducer = UmapReducer()
+
+    # Discovery's label generation tolerates a None router by falling back to
+    # keyword-only labels (mlsc.tasks.topics.discover_topics), so an
+    # unconfigured tier degrades this cadence rather than crashing it,
+    # matching `run_override`'s existing tolerance for the same condition.
+    try:
+        llm_router: LlmRouter | None = LlmRouter.from_configuration()
+    except ConfigurationError:
+        llm_router = None
+
+    async def work(monitor_id: uuid.UUID) -> None:
+        await discover_topics(
+            session_factory,
+            monitor_id=monitor_id,
+            thresholds=thresholds,
+            llm_router=llm_router,
+            reducer=reducer,
+        )
+        await mark_dormant_topics(
+            session_factory,
+            monitor_id=monitor_id,
+            thresholds=thresholds,
+        )
+
+    asyncio.run(_for_each_active_monitor(session_factory, work))
