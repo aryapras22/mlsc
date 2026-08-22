@@ -131,3 +131,31 @@ class TestRunWeeklyDiscovery:
             ("discover_topics", active_id),
             ("mark_dormant_topics", active_id),
         ]
+
+
+class TestRunMonthlyRefit:
+    def test_refits_registry_per_active_monitor(
+        self, session_factory, monkeypatch
+    ) -> None:  # noqa: ANN001
+        active_id = run(_make_monitor(session_factory, status=MonitorStatus.ACTIVE))
+        run(_make_monitor(session_factory, status=MonitorStatus.PAUSED))
+
+        calls: list[uuid.UUID] = []
+
+        async def fake_refit_registry(_session_factory, *, monitor_id, **_kwargs):
+            calls.append(monitor_id)
+
+        # The task builds its own engine/session factory from settings; the
+        # test substitutes the fixture's factory rather than reaching a real
+        # managed Postgres endpoint from configuration.
+        stub_settings = SimpleNamespace(postgres=None)
+        monkeypatch.setattr("mlsc.config.load_settings", lambda: stub_settings)
+        monkeypatch.setattr("mlsc.db.session.build_engine", lambda _postgres: object())
+        monkeypatch.setattr(
+            "mlsc.db.session.build_session_factory", lambda _engine: session_factory
+        )
+        monkeypatch.setattr("mlsc.pipeline.topics.refit.refit_registry", fake_refit_registry)
+
+        scheduled.run_monthly_refit()
+
+        assert calls == [active_id]

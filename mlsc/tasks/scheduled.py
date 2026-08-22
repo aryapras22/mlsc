@@ -230,3 +230,34 @@ def run_weekly_discovery() -> None:
         )
 
     asyncio.run(_for_each_active_monitor(session_factory, work))
+
+
+@app.task(name="mlsc.run_monthly_refit")
+def run_monthly_refit() -> None:
+    """Celery entrypoint. Builds its own dependencies rather than importing a
+    process-wide singleton, matching the pattern in `run_weekly_discovery`
+    above.
+
+    No monitor argument: fires once monthly across every active monitor's
+    topic registry, independent of any one monitor's own collection schedule
+    (design.md, "Success path")."""
+    from mlsc.config import load_settings, load_topic_thresholds
+    from mlsc.db.session import build_engine, build_session_factory
+    from mlsc.pipeline.topics.discovery import HdbscanClusterer
+    from mlsc.pipeline.topics.refit import refit_registry
+
+    settings = load_settings()
+    engine = build_engine(settings.postgres)
+    session_factory = build_session_factory(engine)
+    thresholds = load_topic_thresholds()
+    clusterer = HdbscanClusterer(min_cluster_size=thresholds.min_cluster_size)
+
+    async def work(monitor_id: uuid.UUID) -> None:
+        await refit_registry(
+            session_factory,
+            monitor_id=monitor_id,
+            thresholds=thresholds,
+            clusterer=clusterer,
+        )
+
+    asyncio.run(_for_each_active_monitor(session_factory, work))
