@@ -416,6 +416,47 @@ class BackfillJob(Base):
     )
 
 
+class OverrideKind(str, Enum):
+    STAGE_RERUN = "stage_rerun"
+    BACKFILL_WINDOW = "backfill_window"
+    RETENTION_PURGE = "retention_purge"
+
+
+class OverrideStatus(str, Enum):
+    """``PARTIAL`` is a first-class outcome, not a failure: a backfill window
+    where one date failed did the rest of the work honestly (design.md,
+    "Domain shapes")."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
+class OverrideJob(Base):
+    """An operator-initiated repair: re-run one enrichment stage, fill a
+    wider collection window, or purge past retention — each a job someone
+    can watch rather than a function only tests can call (requirement 5, 7).
+
+    ``parameters`` and ``outcome`` are JSON because they differ per kind: a
+    stage name, a date window, a cutoff. A column per kind would mean a
+    migration per new override kind (design.md, "Domain shapes")."""
+
+    __tablename__ = "override_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("monitors.id", ondelete="CASCADE"))
+    kind: Mapped[OverrideKind]
+    parameters: Mapped[dict] = mapped_column(JSONB)
+    status: Mapped[OverrideStatus] = mapped_column(default=OverrideStatus.PENDING)
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outcome: Mapped[dict | None] = mapped_column(JSONB)
+
+
 class Document(Base):
     """One collected item. Author identity is a hash; nothing else identifies who wrote it.
 
