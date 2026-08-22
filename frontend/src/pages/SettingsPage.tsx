@@ -2,17 +2,24 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   useAttachSource,
+  useOverrides,
+  useRetentionPreview,
   useRun,
   useRunHistory,
   useRunStats,
   useSources,
+  useSubmitOverride,
   useTriggerRun,
   useUpdateSource,
 } from "@/api/queries";
 import { LoadStateView } from "@/components/LoadStateView";
-import type { Source, SourceCreate, SourceName } from "@/api/resources";
+import type { OverrideKind, OverrideRequest, Source, SourceCreate, SourceName, Stage } from "@/api/resources";
 
 const SOURCE_KINDS: SourceName[] = ["play", "appstore", "discourse", "news", "rss", "hackernews"];
+
+const OVERRIDE_KINDS: OverrideKind[] = ["stage_rerun", "backfill_window", "retention_purge"];
+
+const STAGES: Stage[] = ["clean", "language", "relevance", "duplicate", "embed", "sentiment", "intent"];
 
 const CONFIG_FIELD: Record<SourceName, { label: string; placeholder: string }> = {
   play: { label: "Package id", placeholder: "com.roblox.client" },
@@ -63,6 +70,8 @@ export function SettingsPage() {
       </section>
 
       <RecentRuns monitorId={monitorId} />
+
+      <OverridesPanel monitorId={monitorId} />
     </div>
   );
 }
@@ -308,5 +317,138 @@ function RecentRuns({ monitorId }: { monitorId: string }) {
         )}
       />
     </section>
+  );
+}
+
+/** Requirement 1, 2, 3, 4: one form covering all three repair kinds — a
+ * stage re-run needs only a stage, a backfill only a window, and a purge
+ * shows its preview count and submits with the token that count was
+ * issued for, never one the operator typed by hand. */
+function OverridesPanel({ monitorId }: { monitorId: string }) {
+  const [kind, setKind] = useState<OverrideKind>("stage_rerun");
+  const [stage, setStage] = useState<Stage>("clean");
+  const [windowStart, setWindowStart] = useState("");
+  const [windowEnd, setWindowEnd] = useState("");
+  const submit = useSubmitOverride(monitorId);
+  const preview = useRetentionPreview(monitorId, { enabled: kind === "retention_purge" });
+
+  const canSubmit = kind !== "retention_purge" || preview.data !== undefined;
+
+  return (
+    <section>
+      <h2 className="mb-2 font-medium">Repair overrides</h2>
+      <form
+        className="mb-4 grid max-w-md gap-2 border p-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const body: OverrideRequest =
+            kind === "stage_rerun"
+              ? { kind, stage }
+              : kind === "backfill_window"
+                ? { kind, window_start: windowStart, window_end: windowEnd }
+                : { kind, purge_token: preview.data?.token };
+          submit.mutate(body);
+        }}
+      >
+        <h3 className="font-semibold">Submit an override</h3>
+
+        <label htmlFor="override-kind">Kind</label>
+        <select
+          id="override-kind"
+          className="border px-2 py-1"
+          value={kind}
+          onChange={(event) => setKind(event.target.value as OverrideKind)}
+        >
+          {OVERRIDE_KINDS.map((k) => (
+            <option key={k} value={k}>
+              {k}
+            </option>
+          ))}
+        </select>
+
+        {kind === "stage_rerun" && (
+          <>
+            <label htmlFor="override-stage">Stage</label>
+            <select
+              id="override-stage"
+              className="border px-2 py-1"
+              value={stage}
+              onChange={(event) => setStage(event.target.value as Stage)}
+            >
+              {STAGES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+
+        {kind === "backfill_window" && (
+          <>
+            <label htmlFor="override-window-start">Window start</label>
+            <input
+              id="override-window-start"
+              type="date"
+              className="border px-2 py-1"
+              value={windowStart}
+              onChange={(event) => setWindowStart(event.target.value)}
+              required
+            />
+            <label htmlFor="override-window-end">Window end</label>
+            <input
+              id="override-window-end"
+              type="date"
+              className="border px-2 py-1"
+              value={windowEnd}
+              onChange={(event) => setWindowEnd(event.target.value)}
+              required
+            />
+          </>
+        )}
+
+        {kind === "retention_purge" && (
+          <p className="text-sm">
+            {preview.isPending && "Loading preview…"}
+            {preview.data && `${preview.data.count} documents past retention will be removed.`}
+          </p>
+        )}
+
+        <button className="mt-2 border px-3 py-1" type="submit" disabled={submit.isPending || !canSubmit}>
+          {submit.isPending ? "Submitting…" : "Submit override"}
+        </button>
+
+        {submit.isError && (
+          <p role="alert" className="text-sm text-red-600">
+            {submit.error.message}
+          </p>
+        )}
+      </form>
+
+      <OverrideJobList monitorId={monitorId} />
+    </section>
+  );
+}
+
+function OverrideJobList({ monitorId }: { monitorId: string }) {
+  const overrides = useOverrides(monitorId);
+
+  return (
+    <LoadStateView
+      state={overrides.data}
+      render={(jobs) => (
+        <ul className="space-y-1 text-sm">
+          {jobs.map((job) => (
+            <li key={job.id}>
+              {job.kind} — {job.status} — submitted {job.submitted_at}
+              {job.outcome && (
+                <span className="text-muted-foreground"> — {JSON.stringify(job.outcome)}</span>
+              )}
+            </li>
+          ))}
+          {jobs.length === 0 && <li className="text-muted-foreground">No overrides submitted yet.</li>}
+        </ul>
+      )}
+    />
   );
 }

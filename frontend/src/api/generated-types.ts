@@ -136,6 +136,41 @@ export interface paths {
         patch: operations["update_source_sources__source_id__patch"];
         trace?: never;
     };
+    "/monitors/{monitor_id}/overrides/retention-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview Retention */
+        get: operations["preview_retention_monitors__monitor_id__overrides_retention_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/monitors/{monitor_id}/overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Overrides */
+        get: operations["list_overrides_monitors__monitor_id__overrides_get"];
+        put?: never;
+        /** Submit Override */
+        post: operations["submit_override_monitors__monitor_id__overrides_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/monitors/{monitor_id}/overview": {
         parameters: {
             query?: never;
@@ -654,6 +689,68 @@ export interface components {
             /** Status */
             status?: ("active" | "paused" | "archived") | null;
         };
+        /** OverrideJobView */
+        OverrideJobView: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Monitor Id
+             * Format: uuid
+             */
+            monitor_id: string;
+            kind: components["schemas"]["OverrideKind"];
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            };
+            status: components["schemas"]["OverrideStatus"];
+            /**
+             * Submitted At
+             * Format: date-time
+             */
+            submitted_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /** Outcome */
+            outcome: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * OverrideKind
+         * @enum {string}
+         */
+        OverrideKind: "stage_rerun" | "backfill_window" | "retention_purge";
+        /** OverrideRequest */
+        OverrideRequest: {
+            kind: components["schemas"]["OverrideKind"];
+            stage?: components["schemas"]["Stage"] | null;
+            /** Window Start */
+            window_start?: string | null;
+            /** Window End */
+            window_end?: string | null;
+            /** Purge Token */
+            purge_token?: string | null;
+        };
+        /**
+         * OverrideStatus
+         * @description ``PARTIAL`` is a first-class outcome, not a failure: a backfill window
+         *     where one date failed did the rest of the work honestly (design.md,
+         *     "Domain shapes").
+         * @enum {string}
+         */
+        OverrideStatus: "pending" | "running" | "complete" | "partial" | "failed";
+        /** OverrideSubmitResponse */
+        OverrideSubmitResponse: {
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+        };
         /** Overview */
         Overview: {
             period: components["schemas"]["DateRange"];
@@ -676,6 +773,13 @@ export interface components {
          * @enum {string}
          */
         ReadAlertKind: "product" | "scraper";
+        /** RetentionPreviewResponse */
+        RetentionPreviewResponse: {
+            /** Count */
+            count: number;
+            /** Token */
+            token: string;
+        };
         /**
          * RunSourceStatsView
          * @description One source's outcome within a run, for the progress panel's poll
@@ -793,6 +897,11 @@ export interface components {
          * @enum {string}
          */
         SourceName: "play" | "appstore" | "discourse" | "news" | "rss" | "hackernews";
+        /**
+         * Stage
+         * @enum {string}
+         */
+        Stage: "clean" | "language" | "relevance" | "duplicate" | "embed" | "sentiment" | "intent";
         /**
          * TargetType
          * @description What a monitor watches. Closed: seed validation depends on knowing which.
@@ -1182,6 +1291,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MonitorSourceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_retention_monitors__monitor_id__overrides_retention_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                monitor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionPreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_overrides_monitors__monitor_id__overrides_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                monitor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverrideJobView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_override_monitors__monitor_id__overrides_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                monitor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverrideSubmitResponse"];
                 };
             };
             /** @description Validation Error */

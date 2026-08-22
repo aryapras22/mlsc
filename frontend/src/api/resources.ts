@@ -27,6 +27,11 @@ export type EntityComparison = components["schemas"]["EntityComparison"];
 export type Metric = components["schemas"]["Metric"];
 export type SourceName = components["schemas"]["SourceName"];
 export type InsightKind = components["schemas"]["InsightKind"];
+export type Stage = components["schemas"]["Stage"];
+export type OverrideJob = components["schemas"]["OverrideJobView"];
+export type OverrideKind = components["schemas"]["OverrideKind"];
+export type OverrideRequest = components["schemas"]["OverrideRequest"];
+export type RetentionPreview = components["schemas"]["RetentionPreviewResponse"];
 
 export interface DateRangeParams {
   start: string;
@@ -126,4 +131,16 @@ export function updateSource(sourceId: string, body: SourceUpdate): Promise<Sour
 
 export function recordJudgement(insightId: string, useful: boolean): Promise<void> {
   return apiPost<void>(`/insights/${insightId}/judgement`, { useful });
+}
+
+export function previewRetention(monitorId: string): Promise<RetentionPreview> {
+  return apiGet<RetentionPreview>(`/monitors/${monitorId}/overrides/retention-preview`);
+}
+
+export function submitOverride(monitorId: string, body: OverrideRequest): Promise<{ job_id: string }> {
+  return apiPost<{ job_id: string }>(`/monitors/${monitorId}/overrides`, body);
+}
+
+export function listOverrides(monitorId: string): Promise<OverrideJob[]> {
+  return apiGet<OverrideJob[]>(`/monitors/${monitorId}/overrides`);
 }

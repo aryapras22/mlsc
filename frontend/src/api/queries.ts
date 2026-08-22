@@ -185,3 +185,29 @@ export function useRecordJudgement() {
       api.recordJudgement(insightId, useful),
   });
 }
+
+export function useRetentionPreview(monitorId: string, { enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: ["retention-preview", monitorId],
+    queryFn: () => api.previewRetention(monitorId),
+    enabled,
+  });
+}
+
+export function useSubmitOverride(monitorId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: api.OverrideRequest) => api.submitOverride(monitorId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["overrides", monitorId] });
+    },
+  });
+}
+
+export function useOverrides(monitorId: string): { data: LoadState<api.OverrideJob[]> } {
+  const query = useQuery({
+    queryKey: ["overrides", monitorId],
+    queryFn: () => load(() => api.listOverrides(monitorId)),
+  });
+  return { data: query.data ?? { status: "loading" } };
+}

@@ -71,6 +71,7 @@ describe("attaching a source", () => {
           );
         }
         if (path.includes("/sources")) return toResponse([]);
+        if (path.includes("/overrides")) return toResponse([]);
         if (path.includes("/runs")) return toResponse([]);
         return toResponse({ detail: `no fixture for ${method} ${path}` }, { ok: false, status: 404 });
       })
@@ -97,6 +98,7 @@ describe("starting a run with no enabled source", () => {
           return toResponse({ detail: "monitor m1 has no enabled source" }, { ok: false, status: 409 });
         }
         if (path.includes("/sources")) return toResponse([]);
+        if (path.includes("/overrides")) return toResponse([]);
         if (path.includes("/runs")) return toResponse([]);
         return toResponse({ detail: `no fixture for ${method} ${path}` }, { ok: false, status: 404 });
       })
