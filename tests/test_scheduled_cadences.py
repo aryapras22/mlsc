@@ -89,6 +89,25 @@ class TestForEachActiveMonitor:
 
         assert called == [active_id]
 
+    def test_one_monitors_failure_does_not_stop_the_next(
+        self, session_factory, caplog
+    ) -> None:  # noqa: ANN001
+        failing_id = run(_make_monitor(session_factory, status=MonitorStatus.ACTIVE))
+        succeeding_id = run(_make_monitor(session_factory, status=MonitorStatus.ACTIVE))
+
+        called: list[uuid.UUID] = []
+
+        async def work(monitor_id: uuid.UUID) -> None:
+            if monitor_id == failing_id:
+                raise RuntimeError("boom")
+            called.append(monitor_id)
+
+        with caplog.at_level("ERROR"):
+            run(_for_each_active_monitor(session_factory, work))
+
+        assert called == [succeeding_id]
+        assert str(failing_id) in caplog.text
+
 
 class TestRunWeeklyDiscovery:
     def test_discovers_then_marks_dormant_per_active_monitor(
