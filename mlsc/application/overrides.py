@@ -112,10 +112,12 @@ class OverrideService:
         async with self._session_factory() as session:
             monitor = await session.get(Monitor, monitor_id)
             cutoff = self._clock.today() - timedelta(days=monitor.retention_days)
+
             result = await session.execute(
-                select(func.count()).select_from(Document).where(
+                select(func.count(Document.id)).where(
                     Document.monitor_id == monitor_id, Document.published_at < cutoff
                 )
             )
             count = result.scalar_one()
+
         return RetentionPreviewResponse(count=count, token=preview_token(monitor_id, cutoff, count))
