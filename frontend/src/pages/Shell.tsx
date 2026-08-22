@@ -7,6 +7,7 @@ const TABS = [
   { path: "ideas", label: "Ideas" },
   { path: "explorer", label: "Explorer" },
   { path: "compare", label: "Compare" },
+  { path: "settings", label: "Settings" },
 ] as const;
 
 export function Shell() {

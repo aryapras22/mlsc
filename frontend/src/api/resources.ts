@@ -13,6 +13,11 @@ export type EventView = components["schemas"]["EventView"];
 export type InsightView = components["schemas"]["InsightView"];
 export type DocumentPage = components["schemas"]["DocumentPage"];
 export type RunView = components["schemas"]["RunView"];
+export type RunSummary = components["schemas"]["RunSummaryView"];
+export type RunSourceStats = components["schemas"]["RunSourceStatsView"];
+export type Source = components["schemas"]["MonitorSourceResponse"];
+export type SourceCreate = components["schemas"]["MonitorSourceCreateRequest"];
+export type SourceUpdate = components["schemas"]["MonitorSourceUpdateRequest"];
 export type Monitor = components["schemas"]["MonitorResponse"];
 export type MonitorCreate = components["schemas"]["MonitorCreateRequest"];
 export type MonitorUpdate = components["schemas"]["MonitorUpdateRequest"];
@@ -95,8 +100,28 @@ export function getRun(runId: string): Promise<RunView> {
   return apiGet<RunView>(`/runs/${runId}`);
 }
 
+export function getRunStats(runId: string): Promise<RunSourceStats[]> {
+  return apiGet<RunSourceStats[]>(`/runs/${runId}/stats`);
+}
+
+export function listRuns(monitorId: string): Promise<RunSummary[]> {
+  return apiGet<RunSummary[]>(`/monitors/${monitorId}/runs`);
+}
+
 export function triggerRun(monitorId: string, runDate?: string): Promise<{ run_id: string }> {
   return apiPost<{ run_id: string }>(`/monitors/${monitorId}/runs`, { run_date: runDate ?? null });
+}
+
+export function listSources(monitorId: string): Promise<Source[]> {
+  return apiGet<Source[]>(`/monitors/${monitorId}/sources`);
+}
+
+export function attachSource(monitorId: string, body: SourceCreate): Promise<Source> {
+  return apiPost<Source>(`/monitors/${monitorId}/sources`, body);
+}
+
+export function updateSource(sourceId: string, body: SourceUpdate): Promise<Source> {
+  return apiPatch<Source>(`/sources/${sourceId}`, body);
 }
 
 export function recordJudgement(insightId: string, useful: boolean): Promise<void> {

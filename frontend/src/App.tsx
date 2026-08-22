@@ -8,6 +8,7 @@ import { TrendsPage } from "@/pages/TrendsPage";
 import { IdeasPage } from "@/pages/IdeasPage";
 import { ExplorerPage } from "@/pages/ExplorerPage";
 import { ComparePage } from "@/pages/ComparePage";
+import { SettingsPage } from "@/pages/SettingsPage";
 
 function App() {
   return (
@@ -22,6 +23,7 @@ function App() {
         <Route path="ideas" element={<IdeasPage />} />
         <Route path="explorer" element={<ExplorerPage />} />
         <Route path="compare" element={<ComparePage />} />
+        <Route path="settings" element={<SettingsPage />} />
       </Route>
     </Routes>
   );

@@ -103,6 +103,78 @@ export function useTriggerRun(monitorId: string) {
     mutationFn: (runDate?: string) => api.triggerRun(monitorId, runDate),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["overview", monitorId] });
+      queryClient.invalidateQueries({ queryKey: ["run-history", monitorId] });
+    },
+  });
+}
+
+const DEFAULT_RUN_POLL_INTERVAL_MS = 2000;
+
+/** Polls a run until `finished_at` is set (requirement 5), then stops. */
+export function useRun(
+  runId: string,
+  { pollIntervalMs = DEFAULT_RUN_POLL_INTERVAL_MS }: { pollIntervalMs?: number } = {}
+): { data: LoadState<api.RunView> } {
+  const query = useQuery({
+    queryKey: ["run", runId],
+    queryFn: () => load(() => api.getRun(runId)),
+    refetchInterval: (q) => {
+      const state = q.state.data;
+      if (state?.status === "ready" && state.data.finished_at !== null) return false;
+      return pollIntervalMs;
+    },
+  });
+  return { data: query.data ?? { status: "loading" } };
+}
+
+/** The other half of `RunProgress` (design.md, "Domain shapes"): each
+ * source's outcome, polled on the same cadence as the run itself. */
+export function useRunStats(
+  runId: string,
+  { pollIntervalMs = DEFAULT_RUN_POLL_INTERVAL_MS, enabled = true }: { pollIntervalMs?: number; enabled?: boolean } = {}
+): { data: LoadState<api.RunSourceStats[]> } {
+  const query = useQuery({
+    queryKey: ["run-stats", runId],
+    queryFn: () => load(() => api.getRunStats(runId)),
+    enabled,
+    refetchInterval: enabled ? pollIntervalMs : false,
+  });
+  return { data: query.data ?? { status: "loading" } };
+}
+
+export function useRunHistory(monitorId: string): { data: LoadState<api.RunSummary[]> } {
+  const query = useQuery({
+    queryKey: ["run-history", monitorId],
+    queryFn: () => load(() => api.listRuns(monitorId)),
+  });
+  return { data: query.data ?? { status: "loading" } };
+}
+
+export function useSources(monitorId: string): { data: LoadState<api.Source[]> } {
+  const query = useQuery({
+    queryKey: ["sources", monitorId],
+    queryFn: () => load(() => api.listSources(monitorId)),
+  });
+  return { data: query.data ?? { status: "loading" } };
+}
+
+export function useAttachSource(monitorId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: api.SourceCreate) => api.attachSource(monitorId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sources", monitorId] });
+    },
+  });
+}
+
+export function useUpdateSource(monitorId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sourceId, body }: { sourceId: string; body: api.SourceUpdate }) =>
+      api.updateSource(sourceId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sources", monitorId] });
     },
   });
 }
