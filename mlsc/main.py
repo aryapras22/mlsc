@@ -8,12 +8,14 @@ from fastapi import FastAPI
 
 from mlsc.api.monitors import router as monitors_router
 from mlsc.api.runs import router as runs_router
+from mlsc.api.sources import router as sources_router
 from mlsc.api.v1.alerts import router as alerts_router
 from mlsc.api.v1.documents import router as documents_router
 from mlsc.api.v1.insights import judgements_router, router as insights_router
 from mlsc.api.v1.metrics import router as metrics_router
 from mlsc.application.monitors import MonitorService
 from mlsc.application.runs import RunService
+from mlsc.application.sources import MonitorSourceService
 from mlsc.bootstrap import start_process
 from mlsc.core.locks import RunLock
 from mlsc.tasks.celery_dispatcher import CeleryDispatcher
@@ -27,6 +29,7 @@ async def _lifespan(app: FastAPI):
     app.state.run_service = RunService(
         startup.session_factory, RunLock(startup.redis), CeleryDispatcher()
     )
+    app.state.monitor_source_service = MonitorSourceService(startup.session_factory)
     try:
         yield
     finally:
@@ -38,6 +41,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="mlsc", lifespan=_lifespan)
     app.include_router(monitors_router)
     app.include_router(runs_router)
+    app.include_router(sources_router)
     app.include_router(metrics_router)
     app.include_router(insights_router)
     app.include_router(judgements_router)
