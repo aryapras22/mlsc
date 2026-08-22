@@ -284,3 +284,26 @@ def run_retention_sweep() -> None:
         await enforce_retention(session_factory, monitor_id)
 
     asyncio.run(_for_each_active_monitor(session_factory, work))
+
+
+@app.task(name="mlsc.run_stability_snapshot")
+def run_stability_snapshot() -> None:
+    """Celery entrypoint. Builds its own dependencies rather than importing a
+    process-wide singleton, matching the pattern in `run_retention_sweep`
+    above.
+
+    No monitor argument: fires weekly across every active monitor's current
+    document-to-topic assignments, independent of any one monitor's own
+    collection schedule (design.md, "Success path")."""
+    from mlsc.config import load_settings
+    from mlsc.db.session import build_engine, build_session_factory
+    from mlsc.tasks.maintenance import take_snapshot
+
+    settings = load_settings()
+    engine = build_engine(settings.postgres)
+    session_factory = build_session_factory(engine)
+
+    async def work(monitor_id: uuid.UUID) -> None:
+        await take_snapshot(session_factory, monitor_id=monitor_id)
+
+    asyncio.run(_for_each_active_monitor(session_factory, work))
