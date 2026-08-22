@@ -6,7 +6,9 @@ id per that design's projection contract. `dispatch_run` is what
 `CeleryDispatcher.dispatch_run` enqueues from inside `RunService.start`; it
 loads the run's monitor id and hands both to `mlsc.tasks.dispatch.dispatch_run`
 (on-demand-collection design.md, "Where the task lives and how it gets its
-dependencies").
+dependencies"). `run_override` is what `CeleryDispatcher.dispatch_override`
+enqueues from inside `OverrideService.submit`, matching the same pattern
+(monitor-repair-overrides design.md, "Dependencies, injected").
 """
 
 from __future__ import annotations
@@ -81,3 +83,33 @@ def dispatch_run(run_id: str) -> None:
         )
 
     asyncio.run(_run())
+
+
+@app.task(name="mlsc.run_override")
+def run_override(job_id: str) -> None:
+    """Celery entrypoint. Builds its own dependencies rather than importing a
+    process-wide singleton, matching the pattern in `dispatch_run` above."""
+    import uuid
+
+    from mlsc.bootstrap import build_redis_client
+    from mlsc.config import load_settings
+    from mlsc.core.fetch.assembly import build_fetch_client
+    from mlsc.db.session import build_engine, build_session_factory
+    from mlsc.pipeline.enrich import Embedder, SentimentScorer
+    from mlsc.tasks.overrides import run_override as run_override_job
+
+    settings = load_settings()
+    engine = build_engine(settings.postgres)
+    session_factory = build_session_factory(engine)
+    redis = build_redis_client(settings.redis)
+    fetch_client = build_fetch_client(redis)
+
+    asyncio.run(
+        run_override_job(
+            session_factory,
+            job_id=uuid.UUID(job_id),
+            fetch_client=fetch_client,
+            embedder=Embedder(),
+            sentiment_scorer=SentimentScorer(),
+        )
+    )

@@ -12,6 +12,7 @@ from mlsc.worker import app
 _ENQUEUED_TASK_NAMES = {
     "mlsc.run_monitor",  # mlsc/beat.py, MonitorAwareScheduler's projected entry
     "mlsc.dispatch_run",  # mlsc/tasks/celery_dispatcher.py, CeleryDispatcher.dispatch_run
+    "mlsc.run_override",  # mlsc/tasks/celery_dispatcher.py, CeleryDispatcher.dispatch_override
 }
 
 
