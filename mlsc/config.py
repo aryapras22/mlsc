@@ -199,6 +199,34 @@ class ThemeRelevanceSettings(BaseSettings):
     threshold: float = Field(default=0.35, gt=0, lt=1)
 
 
+class FetchClientSettings(BaseSettings):
+    """Every value the shared fetch client's breaker, cache, throttle, and
+    impersonating transport need, so the assembly building them has nothing
+    hardcoded (on-demand-collection design.md, "Who assembles the fetch
+    client")."""
+
+    model_config = SettingsConfigDict(env_prefix="MLSC_FETCH_", frozen=True, extra="ignore")
+
+    breaker_failure_threshold: int = Field(default=3, ge=1)
+    breaker_cooldown_seconds: float = Field(default=60.0, gt=0)
+    cache_ttl_seconds: int = Field(default=3600, ge=0)
+    host_budget_capacity: float = Field(default=5.0, gt=0)
+    host_budget_refill_rate_per_second: float = Field(default=1.0, gt=0)
+    host_budget_jitter_low_seconds: float = Field(default=0.5, ge=0)
+    host_budget_jitter_high_seconds: float = Field(default=2.0, ge=0)
+    impersonate_profile: str = "chrome124"
+    max_transport_retries: int = Field(default=2, ge=0)
+    retry_backoff_seconds: float = Field(default=1.0, gt=0)
+
+    @model_validator(mode="after")
+    def _require_jitter_high_at_least_low(self) -> FetchClientSettings:
+        if self.host_budget_jitter_high_seconds < self.host_budget_jitter_low_seconds:
+            raise ValueError(
+                "host_budget_jitter_high_seconds must be >= host_budget_jitter_low_seconds"
+            )
+        return self
+
+
 @dataclass(frozen=True)
 class Settings:
     postgres: PostgresSettings
@@ -224,6 +252,10 @@ def load_trend_detection_settings() -> TrendDetectionSettings:
 
 def load_theme_relevance_settings() -> ThemeRelevanceSettings:
     return _load(ThemeRelevanceSettings)
+
+
+def load_fetch_client_settings() -> FetchClientSettings:
+    return _load(FetchClientSettings)
 
 
 def load_llm_tier_settings(tier: str) -> LlmTierSettings:

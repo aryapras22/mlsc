@@ -111,7 +111,6 @@ services:
       retries: 5
       start_period: 20s
 
-  # --include is required because mlsc/worker.py registers no task modules itself.
   worker:
     <<: *app-image
     command:
@@ -121,7 +120,6 @@ services:
       - worker
       - --queues=io
       - --loglevel=info
-      - --include=mlsc.tasks.scheduled
     environment: *app-env
     volumes:
       - model-cache:/opt/model-cache
