@@ -5,7 +5,6 @@ without re-fetching anything (requirement 8, 9).
 from __future__ import annotations
 
 import uuid
-from enum import Enum
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -19,21 +18,9 @@ from mlsc.pipeline.intent import PROMPT_VERSION, classify_intents
 from mlsc.pipeline.language import detect_language
 from mlsc.pipeline.normalize import clean_text, hash_content, strip_pii
 from mlsc.pipeline.relevance import ThemeRelevanceScorer, is_relevant, score_relevance
+from mlsc.pipeline.stages import ALL_STAGES, Stage
 
 _INTENT_BATCH_SIZE = 40
-
-
-class Stage(str, Enum):
-    CLEAN = "clean"
-    LANGUAGE = "language"
-    RELEVANCE = "relevance"
-    DUPLICATE = "duplicate"
-    EMBED = "embed"
-    SENTIMENT = "sentiment"
-    INTENT = "intent"
-
-
-ALL_STAGES = frozenset(Stage)
 
 
 class ThemeRelevanceContext:
