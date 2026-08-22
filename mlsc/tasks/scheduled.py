@@ -92,9 +92,10 @@ def run_override(job_id: str) -> None:
     import uuid
 
     from mlsc.bootstrap import build_redis_client
-    from mlsc.config import load_settings
+    from mlsc.config import ConfigurationError, load_settings
     from mlsc.core.fetch.assembly import build_fetch_client
     from mlsc.db.session import build_engine, build_session_factory
+    from mlsc.llm.router import LlmRouter
     from mlsc.pipeline.enrich import Embedder, SentimentScorer
     from mlsc.tasks.overrides import run_override as run_override_job
 
@@ -104,6 +105,15 @@ def run_override(job_id: str) -> None:
     redis = build_redis_client(settings.redis)
     fetch_client = build_fetch_client(redis)
 
+    # Only a stage_rerun of the intent stage needs this, and the kind isn't
+    # known until the job loads — unlike the daily pipeline, an unconfigured
+    # tier here must not fail every override, only the ones that use it
+    # (mlsc.pipeline.enrich already treats a None router as "skip intent").
+    try:
+        llm_router: LlmRouter | None = LlmRouter.from_configuration()
+    except ConfigurationError:
+        llm_router = None
+
     asyncio.run(
         run_override_job(
             session_factory,
@@ -111,5 +121,6 @@ def run_override(job_id: str) -> None:
             fetch_client=fetch_client,
             embedder=Embedder(),
             sentiment_scorer=SentimentScorer(),
+            llm_router=llm_router,
         )
     )

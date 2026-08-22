@@ -28,6 +28,7 @@ from mlsc.db.models import (
     RollupReason,
     TargetType,
 )
+from mlsc.llm.router import LlmRouter
 from mlsc.pipeline.analytics.buckets import bucket_for
 from mlsc.pipeline.enrich import Embedder, SentimentScorer
 from mlsc.pipeline.stages import Stage
@@ -46,6 +47,7 @@ async def run_override(
     fetch_client: FetchClient,
     embedder: Embedder,
     sentiment_scorer: SentimentScorer,
+    llm_router: LlmRouter | None = None,
 ) -> None:
     async with session_factory() as session:
         job = await session.get(OverrideJob, job_id)
@@ -60,6 +62,7 @@ async def run_override(
             stage=Stage(parameters["stage"]),
             embedder=embedder,
             sentiment_scorer=sentiment_scorer,
+            llm_router=llm_router,
         )
     elif kind is OverrideKind.BACKFILL_WINDOW:
         status, outcome = await _run_backfill_window(
@@ -87,6 +90,7 @@ async def _run_stage_rerun(
     stage: Stage,
     embedder: Embedder,
     sentiment_scorer: SentimentScorer,
+    llm_router: LlmRouter | None = None,
 ) -> tuple[OverrideStatus, dict[str, Any]]:
     async with session_factory() as session:
         monitor = await session.get(Monitor, monitor_id)
@@ -106,6 +110,7 @@ async def _run_stage_rerun(
             stages=frozenset({stage}),
             embedder=embedder,
             sentiment_scorer=sentiment_scorer,
+            llm_router=llm_router,
             theme_relevance=theme_relevance,
         )
     except Exception as error:  # noqa: BLE001 - recorded as the job's outcome, not raised further
