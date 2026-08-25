@@ -44,8 +44,11 @@ services:
       POSTGRES_DB: ${MLSC_LOCAL_POSTGRES_DB:?set MLSC_LOCAL_POSTGRES_DB in your local env file}
       POSTGRES_USER: ${MLSC_LOCAL_POSTGRES_USER:?set MLSC_LOCAL_POSTGRES_USER in your local env file}
       POSTGRES_PASSWORD: ${MLSC_LOCAL_POSTGRES_PASSWORD:?set MLSC_LOCAL_POSTGRES_PASSWORD in your local env file}
+    # A different host port from docker-compose.local.yml's 55433. Sharing one meant
+    # whichever stack won the port answered the test suite, and its create_all wiped
+    # this Alembic-managed schema.
     ports:
-      - "${MLSC_LOCAL_POSTGRES_PORT:?set MLSC_LOCAL_POSTGRES_PORT in your local env file}:5432"
+      - "${MLSC_APP_POSTGRES_PORT:?set MLSC_APP_POSTGRES_PORT in your local env file}:5432"
     volumes:
       - postgres-data:/home/postgres/pgdata
       - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro

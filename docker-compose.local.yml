@@ -8,16 +8,19 @@ services:
     # PostgreSQL 16.14 with TimescaleDB 2.29.1 and pgvector. Pinned by digest
     # because the mutable pg16 tag moves with every Timescale release.
     image: timescale/timescaledb-ha:pg16@sha256:df8eaa04de65fbe238df8dbc356e79108bcb8166d3458833536a3ff745abb2be
+    # mlsc_test, not mlsc: the test fixtures drop_all/create_all this database on every
+    # run, so its name must never match the application's.
     environment:
-      POSTGRES_DB: mlsc
+      POSTGRES_DB: mlsc_test
       POSTGRES_USER: mlsc
       POSTGRES_PASSWORD: mlsc
     ports:
       - "55433:5432"
     volumes:
       - postgres-data:/home/postgres/pgdata
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mlsc -d mlsc"]
+      test: ["CMD-SHELL", "pg_isready -U mlsc -d mlsc_test"]
       interval: 5s
       timeout: 5s
       retries: 20

@@ -73,7 +73,7 @@ class FakeProvider:
 def _make_router(provider: FakeProvider) -> LlmRouter:
     return LlmRouter({Tier.INTENT: provider, Tier.LABELING: provider, Tier.INSIGHT: provider})
 
-LOCAL_DATABASE_URL = "postgresql+asyncpg://mlsc:mlsc@localhost:55433/mlsc"
+LOCAL_DATABASE_URL = "postgresql+asyncpg://mlsc:mlsc@localhost:55433/mlsc_test"
 
 
 def run(coro):  # noqa: ANN001, ANN201
@@ -110,7 +110,7 @@ def session_factory():
     engine = create_async_engine(LOCAL_DATABASE_URL, poolclass=pool.NullPool)
     if not run(_reachable(engine)):
         run(engine.dispose())
-        pytest.skip("local Compose PostgreSQL is not reachable at localhost:55433")
+        pytest.skip("local Compose PostgreSQL is not reachable at localhost:55433/mlsc_test")
 
     async def reset():
         async with engine.begin() as conn:

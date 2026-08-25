@@ -36,7 +36,7 @@ from mlsc.schemas.sources import MonitorSourceCreateRequest
 from mlsc.sources.play import PlayAdapter, PlayCollectionFailed, PlayCursor
 from mlsc.tasks.ingest import collect_play_reviews
 
-LOCAL_DATABASE_URL = "postgresql+asyncpg://mlsc:mlsc@localhost:55433/mlsc"
+LOCAL_DATABASE_URL = "postgresql+asyncpg://mlsc:mlsc@localhost:55433/mlsc_test"
 
 # One real review's positional shape, captured from a live com.roblox.client
 # response and reused verbatim so the fixture matches what Play actually sends.
@@ -247,7 +247,7 @@ def session_factory() -> async_sessionmaker:
     engine = create_async_engine(LOCAL_DATABASE_URL, poolclass=pool.NullPool)
     if not run(_reachable(engine)):
         run(engine.dispose())
-        pytest.skip("local Compose PostgreSQL is not reachable at localhost:55433")
+        pytest.skip("local Compose PostgreSQL is not reachable at localhost:55433/mlsc_test")
     run(_reset_schema(engine))
     factory = async_sessionmaker(engine, expire_on_commit=False)
     yield factory

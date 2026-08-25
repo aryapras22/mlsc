@@ -20,7 +20,7 @@ from mlsc.schemas.monitors import MonitorCreateRequest
 from mlsc.tasks import scheduled
 from mlsc.tasks.scheduled import _for_each_active_monitor
 
-LOCAL_DATABASE_URL = "postgresql+asyncpg://mlsc:mlsc@localhost:55433/mlsc"
+LOCAL_DATABASE_URL = "postgresql+asyncpg://mlsc:mlsc@localhost:55433/mlsc_test"
 
 
 def run(coro):  # noqa: ANN001, ANN201
@@ -41,7 +41,7 @@ def session_factory():
     engine = create_async_engine(LOCAL_DATABASE_URL, poolclass=pool.NullPool)
     if not run(_reachable(engine)):
         run(engine.dispose())
-        pytest.skip("local Compose PostgreSQL is not reachable at localhost:55433")
+        pytest.skip("local Compose PostgreSQL is not reachable at localhost:55433/mlsc_test")
 
     async def reset():
         async with engine.begin() as conn:
