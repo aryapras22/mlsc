@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from mlsc.application.runs import RunService, SourceOutcome, SourceResult
 from mlsc.core.fetch.client import FetchClient
 from mlsc.db.models import RunStatus, SourceName
-from mlsc.tasks.ingest import SourceDisabled, collect_play_reviews
+from mlsc.sources.news.extract import ArticleExtractor
+from mlsc.sources.news.resolve import RedirectResolver
+from mlsc.tasks.ingest import SourceDisabled, collect_source
 from mlsc.tasks.maintenance import evaluate_source_health
 
 
@@ -24,12 +26,18 @@ async def dispatch_run(
     fetch_client: FetchClient,
     run_id: uuid.UUID,
     monitor_id: uuid.UUID,
+    resolver: RedirectResolver | None = None,
+    extractor: ArticleExtractor | None = None,
 ) -> None:
     sources = await run_service.enabled_sources(monitor_id)
 
     outcomes: list[SourceOutcome] = []
     for source in sources:
-        outcomes.append(await collect_one_source(session_factory, fetch_client, run_id, source))
+        outcomes.append(
+            await collect_one_source(
+                session_factory, fetch_client, run_id, source, resolver, extractor
+            )
+        )
 
     status = await run_service.finalise(run_id, outcomes, expected_volume=bool(sources))
     await evaluate_source_health(session_factory, run_id)
@@ -107,7 +115,12 @@ async def _run_downstream_pipeline(
     )
 
 
-async def collect_one_source(session_factory, fetch_client, run_id, source) -> SourceOutcome:  # noqa: ANN001
+async def collect_one_source(  # noqa: ANN001
+    session_factory, fetch_client, run_id, source, resolver=None, extractor=None
+) -> SourceOutcome:
+    # TODO: the news collaborators are optional only while this branch still
+    # skips every kind but Play, which needs neither of them. Both become
+    # required once the branch goes and the Celery entrypoint assembles them.
     if source.source_name is not SourceName.PLAY:
         return SourceOutcome(
             source_id=source.id,
@@ -117,9 +130,11 @@ async def collect_one_source(session_factory, fetch_client, run_id, source) -> S
         )
 
     try:
-        stats = await collect_play_reviews(
+        stats = await collect_source(
             session_factory=session_factory,
             fetch_client=fetch_client,
+            resolver=resolver,
+            extractor=extractor,
             run_id=run_id,
             source_id=source.id,
         )

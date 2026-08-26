@@ -34,7 +34,7 @@ from mlsc.pipeline.normalize import hash_author
 from mlsc.schemas.monitors import MonitorCreateRequest
 from mlsc.schemas.sources import MonitorSourceCreateRequest
 from mlsc.sources.play import PlayAdapter, PlayCollectionFailed, PlayCursor
-from mlsc.tasks.ingest import collect_play_reviews
+from mlsc.tasks.ingest import collect_source
 
 LOCAL_DATABASE_URL = "postgresql+asyncpg://mlsc:mlsc@localhost:55433/mlsc_test"
 
@@ -169,6 +169,19 @@ def build_client(transport: FakeTransport) -> FetchClient:
     )
 
 
+class UnusedResolver:
+    """A Play source resolves no redirects and extracts no articles, so a call to
+    either collaborator would mean the wrong plan ran."""
+
+    async def resolve(self, google_news_url: str) -> str:
+        raise AssertionError("the play plan must not resolve redirects")
+
+
+class UnusedExtractor:
+    async def extract(self, url: str) -> str:
+        raise AssertionError("the play plan must not extract articles")
+
+
 def run(coro: Any) -> Any:
     return asyncio.run(coro)
 
@@ -301,9 +314,11 @@ class TestCollectionTask:
             )
             client = build_client(transport)
             run_id = await _create_run(session_factory, monitor_id, is_backfill=is_backfill)
-            return await collect_play_reviews(
+            return await collect_source(
                 session_factory=session_factory,
                 fetch_client=client,
+                resolver=UnusedResolver(),
+                extractor=UnusedExtractor(),
                 run_id=run_id,
                 source_id=source_id,
             )
@@ -339,9 +354,11 @@ class TestCollectionTask:
         run_id = run(_create_run(session_factory, monitor_id))
 
         stats = run(
-            collect_play_reviews(
+            collect_source(
                 session_factory=session_factory,
                 fetch_client=client,
+                resolver=UnusedResolver(),
+                extractor=UnusedExtractor(),
                 run_id=run_id,
                 source_id=source_id,
             )
@@ -370,9 +387,11 @@ class TestCollectionTask:
         run_id = run(_create_run(session_factory, monitor_id))
 
         stats = run(
-            collect_play_reviews(
+            collect_source(
                 session_factory=session_factory,
                 fetch_client=client,
+                resolver=UnusedResolver(),
+                extractor=UnusedExtractor(),
                 run_id=run_id,
                 source_id=source_id,
             )
@@ -397,9 +416,11 @@ class TestCollectionTask:
         run_id = run(_create_run(session_factory, monitor_id))
 
         run(
-            collect_play_reviews(
+            collect_source(
                 session_factory=session_factory,
                 fetch_client=client,
+                resolver=UnusedResolver(),
+                extractor=UnusedExtractor(),
                 run_id=run_id,
                 source_id=source_id,
             )

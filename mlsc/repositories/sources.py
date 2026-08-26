@@ -47,8 +47,23 @@ class MonitorSourceRepository:
         return list(result.scalars().all())
 
     async def save_cursor(
-        self, source_id: uuid.UUID, *, last_external_id: str, last_published_at: datetime
+        self,
+        source_id: uuid.UUID,
+        *,
+        last_external_id: str | None = None,
+        last_published_at: datetime | None = None,
     ) -> None:
+        """Advance whichever cursor fields the caller's kind tracks.
+
+        Callers pass the fields of the cursor their adapter returned, and a kind
+        tracks only some of them — App Store has no timestamp, the query-driven
+        kinds no external id. An omitted field is left as it stands rather than
+        written as null, so advancing one does not clear the other
+        (all-source-collection design.md, "Cursor write-back reads the new
+        cursor's own fields").
+        """
         source = await self.get(source_id)
-        source.last_external_id = last_external_id
-        source.last_published_at = last_published_at
+        if last_external_id is not None:
+            source.last_external_id = last_external_id
+        if last_published_at is not None:
+            source.last_published_at = last_published_at
