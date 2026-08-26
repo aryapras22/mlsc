@@ -21,7 +21,16 @@ class HealthRepository:
         )
         health = result.scalar_one_or_none()
         if health is None:
-            health = SourceHealth(id=uuid.uuid4(), monitor_source_id=monitor_source_id)
+            # The counters and state carry column defaults, which SQLAlchemy only
+            # applies on flush — callers read this object before then, and a
+            # never-seen source means zero streaks and no verdict against it yet.
+            health = SourceHealth(
+                id=uuid.uuid4(),
+                monitor_source_id=monitor_source_id,
+                consecutive_empty=0,
+                consecutive_fail=0,
+                state=SourceState.HEALTHY,
+            )
             self._session.add(health)
         return health
 
