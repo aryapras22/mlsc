@@ -11,6 +11,7 @@ import dataclasses
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from mlsc.core.fetch.client import FetchClient
 from mlsc.db.models import MonitorSource, SourceName
@@ -318,14 +319,40 @@ def _discourse_items(payload: DiscourseResult) -> list[CollectedItem]:
     ]
 
 
+# A host can contain neither a colon nor a space, so this cannot collide with a
+# real outlet, and an item whose URL has no host still needs a handle because
+# documents.author_hash is not nullable.
+_UNKNOWN_OUTLET = "outlet:unknown"
+
+
+def _outlet_handle(url: str | None) -> str:
+    """The outlet host of ``url``, standing in for the author a news or RSS item
+    does not carry (design.md, "An author hash for a source with no author").
+
+    A leading ``www.`` is stripped so one outlet does not read as two authors and
+    understate C6's single-author concentration penalty. The result is the raw
+    handle; ``hash_author`` is applied where the document row is built (C11).
+    """
+    if not url:
+        return _UNKNOWN_OUTLET
+    try:
+        # urlsplit().hostname is already lowercased and free of any port and
+        # userinfo, so the www. prefix is all that is left to normalize.
+        host = urlsplit(url).hostname
+    except ValueError:
+        return _UNKNOWN_OUTLET
+    return host.removeprefix("www.") if host else _UNKNOWN_OUTLET
+
+
 def _news_items(payload: NewsResult) -> list[CollectedItem]:
-    """An article has no per-item author, so ``author_handle`` is absent here;
-    what stands in for it is the outlet, derived from the resolved URL by the
-    caller (design.md, "An author hash for a source with no author")."""
+    """An article carries no per-item author, so the outlet host of its resolved
+    URL stands in as the handle (design.md, "An author hash for a source with no
+    author"). Derived per item, because different articles answering one query
+    legitimately come from different outlets."""
     return [
         CollectedItem(
             external_id=article.external_id,
-            author_handle=None,
+            author_handle=_outlet_handle(article.resolved_url),
             title=article.title,
             body=article.text,
             published_at=article.published_at,
@@ -339,12 +366,18 @@ def _news_items(payload: NewsResult) -> list[CollectedItem]:
 
 
 def _rss_items(payload: FeedResult) -> list[CollectedItem]:
-    """A feed entry has no per-item author either, and its ``summary`` is the
-    only text it offers."""
+    """A feed entry has no per-item author either, so the outlet host of its own
+    link stands in as the handle, and its ``summary`` is the only text it offers.
+
+    Every entry in a feed is the same outlet, so the feed's own host would be the
+    right fallback for an entry with no link — but ``CollectionResult`` does not
+    carry the feed URL and ``FeedAdapter`` keeps it private, so an entry with no
+    link falls back to the unknown-outlet handle instead.
+    """
     return [
         CollectedItem(
             external_id=item.external_id,
-            author_handle=None,
+            author_handle=_outlet_handle(item.url),
             title=item.title,
             body=item.content,
             published_at=item.published_at,
