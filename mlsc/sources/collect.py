@@ -15,12 +15,16 @@ from typing import Any
 from mlsc.core.fetch.client import FetchClient
 from mlsc.db.models import MonitorSource, SourceName
 from mlsc.sources.appstore import LIBRARY_VERSION as APPSTORE_LIBRARY_VERSION
+from mlsc.sources.appstore import CollectionResult as AppStoreResult
 from mlsc.sources.appstore import AppStoreAdapter, AppStoreCursor
 from mlsc.sources.base import SourceAdapter
 from mlsc.sources.discourse import LIBRARY_VERSION as DISCOURSE_LIBRARY_VERSION
+from mlsc.sources.discourse import CollectionResult as DiscourseResult
 from mlsc.sources.discourse import DiscourseAdapter, DiscourseCursor
 from mlsc.sources.hackernews import LIBRARY_VERSION as HACKERNEWS_LIBRARY_VERSION
+from mlsc.sources.hackernews import CollectionResult as HackerNewsResult
 from mlsc.sources.hackernews import HackerNewsAdapter, HackerNewsCursor
+from mlsc.sources.news.adapter import CollectionResult as NewsResult
 from mlsc.sources.news.adapter import NewsAdapter, NewsCursor
 
 # The news adapter module declares no version of its own: what it returns is
@@ -30,8 +34,10 @@ from mlsc.sources.news.extract import LIBRARY_VERSION as NEWS_LIBRARY_VERSION
 from mlsc.sources.news.extract import ArticleExtractor
 from mlsc.sources.news.resolve import RedirectResolver
 from mlsc.sources.play import LIBRARY_VERSION as PLAY_LIBRARY_VERSION
+from mlsc.sources.play import CollectionResult as PlayResult
 from mlsc.sources.play import PlayAdapter, PlayCursor
 from mlsc.sources.rss import LIBRARY_VERSION as RSS_LIBRARY_VERSION
+from mlsc.sources.rss import CollectionResult as FeedResult
 from mlsc.sources.rss import FeedAdapter, FeedCursor
 
 
@@ -248,4 +254,136 @@ _PLAN_BUILDERS: dict[SourceName, _PlanBuilder] = {
     SourceName.NEWS: _news_plan,
     SourceName.RSS: _rss_plan,
     SourceName.HACKERNEWS: _hackernews_plan,
+}
+
+
+def items_from(source_name: SourceName, payload: Any) -> list[CollectedItem]:
+    """Normalize one adapter's ``CollectionResult`` into the shared item shape.
+
+    The six payloads agree on neither their fields nor even the name of their
+    item list — ``reviews``, ``posts``, ``articles``, ``items`` — so this and
+    ``plan_for`` are the only two places a source kind is visible (learn.md,
+    "Anti-corruption layer").
+
+    A field the kind does not carry stays ``None``. A zero or an empty string
+    would record a measurement the source never made, and an absent rating and
+    a rating of zero are different facts (requirement 4, C5).
+
+    As with ``plan_for``, a ``SourceName`` with no mapper here is a bug rather
+    than a domain outcome, so the lookup is left to raise.
+    """
+    return _ITEM_MAPPERS[source_name](payload)
+
+
+def _review_items(payload: PlayResult | AppStoreResult) -> list[CollectedItem]:
+    """Both app stores expose the same review fields under the same names, so
+    one mapper serves both kinds; they are also the only two kinds carrying a
+    rating or an application version at all.
+
+    ``author_handle`` is the raw username: hashing belongs to the document row,
+    not here (C11, design.md "An author hash for a source with no author").
+    """
+    return [
+        CollectedItem(
+            external_id=review.external_id,
+            author_handle=review.username,
+            title=None,
+            body=review.content,
+            published_at=review.published_at,
+            url=None,
+            rating=review.rating,
+            app_version=review.app_version,
+            engagement=None,
+        )
+        for review in payload.reviews
+    ]
+
+
+def _discourse_items(payload: DiscourseResult) -> list[CollectedItem]:
+    """A search hit carries the post's blurb and its like count, but no title
+    and no link of its own."""
+    return [
+        CollectedItem(
+            external_id=post.external_id,
+            author_handle=post.username,
+            title=None,
+            body=post.content,
+            published_at=post.published_at,
+            url=None,
+            rating=None,
+            app_version=None,
+            engagement=post.engagement,
+        )
+        for post in payload.posts
+    ]
+
+
+def _news_items(payload: NewsResult) -> list[CollectedItem]:
+    """An article has no per-item author, so ``author_handle`` is absent here;
+    what stands in for it is the outlet, derived from the resolved URL by the
+    caller (design.md, "An author hash for a source with no author")."""
+    return [
+        CollectedItem(
+            external_id=article.external_id,
+            author_handle=None,
+            title=article.title,
+            body=article.text,
+            published_at=article.published_at,
+            url=article.resolved_url,
+            rating=None,
+            app_version=None,
+            engagement=None,
+        )
+        for article in payload.articles
+    ]
+
+
+def _rss_items(payload: FeedResult) -> list[CollectedItem]:
+    """A feed entry has no per-item author either, and its ``summary`` is the
+    only text it offers."""
+    return [
+        CollectedItem(
+            external_id=item.external_id,
+            author_handle=None,
+            title=item.title,
+            body=item.content,
+            published_at=item.published_at,
+            url=item.url,
+            rating=None,
+            app_version=None,
+            engagement=None,
+        )
+        for item in payload.items
+    ]
+
+
+def _hackernews_items(payload: HackerNewsResult) -> list[CollectedItem]:
+    """A story carries a title, a link, an author and a score but no text of its
+    own, so ``body`` is absent for every item of this kind — the title stands in
+    for it downstream (design.md, "``body`` falls back to the title")."""
+    return [
+        CollectedItem(
+            external_id=item.external_id,
+            author_handle=item.author,
+            title=item.title,
+            body=None,
+            published_at=item.published_at,
+            url=item.url,
+            rating=None,
+            app_version=None,
+            engagement=item.engagement,
+        )
+        for item in payload.items
+    ]
+
+
+_ItemMapper = Callable[[Any], list[CollectedItem]]
+
+_ITEM_MAPPERS: dict[SourceName, _ItemMapper] = {
+    SourceName.PLAY: _review_items,
+    SourceName.APPSTORE: _review_items,
+    SourceName.DISCOURSE: _discourse_items,
+    SourceName.NEWS: _news_items,
+    SourceName.RSS: _rss_items,
+    SourceName.HACKERNEWS: _hackernews_items,
 }
