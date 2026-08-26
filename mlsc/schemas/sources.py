@@ -36,18 +36,31 @@ def _validate_appstore_config(config: dict[str, Any]) -> str:
     return app_id
 
 
+def _validated_queries(config: dict[str, Any]) -> list[str]:
+    """Check the configured queries, shared by the three kinds that fan out one
+    adapter per query."""
+    queries = config.get("queries")
+    if (
+        not isinstance(queries, list)
+        or not queries
+        or not all(isinstance(query, str) and query.strip() for query in queries)
+    ):
+        raise ValueError("config.queries must be a non-empty list of non-empty strings")
+    return queries
+
+
 def _validate_discourse_config(config: dict[str, Any]) -> str:
     base_url = config.get("base_url")
     if not isinstance(base_url, str) or not re.match(r"^https?://[^/]+/?$", base_url):
         raise ValueError(f"config.base_url {base_url!r} is not a well-formed forum base URL")
-    return base_url.rstrip("/")
+    queries = _validated_queries(config)
+    # Two different searches of one forum are two legitimate sources, so the
+    # queries belong in the key monitor_sources is unique on, not just the host.
+    return "|".join([base_url.rstrip("/"), *queries])
 
 
 def _validate_news_config(config: dict[str, Any]) -> str:
-    queries = config.get("queries")
-    if not isinstance(queries, list) or not queries or not all(isinstance(q, str) for q in queries):
-        raise ValueError("config.queries must be a non-empty list of strings")
-    return "|".join(queries)
+    return "|".join(_validated_queries(config))
 
 
 def _validate_feed_config(config: dict[str, Any]) -> str:
@@ -58,10 +71,7 @@ def _validate_feed_config(config: dict[str, Any]) -> str:
 
 
 def _validate_hackernews_config(config: dict[str, Any]) -> str:
-    queries = config.get("queries")
-    if not isinstance(queries, list) or not queries or not all(isinstance(q, str) for q in queries):
-        raise ValueError("config.queries must be a non-empty list of strings")
-    return "|".join(queries)
+    return "|".join(_validated_queries(config))
 
 
 _INSTANCE_KEY_VALIDATORS = {
