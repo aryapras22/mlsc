@@ -68,8 +68,11 @@ services:
       - redis-server
       - --requirepass
       - ${MLSC_LOCAL_REDIS_PASSWORD:?set MLSC_LOCAL_REDIS_PASSWORD in your local env file}
+    # Distinct from docker-compose.local.yml's 56379 for the same reason as the
+    # postgres port above: two stacks publishing one port means whichever won it
+    # answered, and the loser could not start at all.
     ports:
-      - "${MLSC_LOCAL_REDIS_PORT:?set MLSC_LOCAL_REDIS_PORT in your local env file}:6379"
+      - "${MLSC_APP_REDIS_PORT:?set MLSC_APP_REDIS_PORT in your local env file}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
