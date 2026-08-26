@@ -18,6 +18,7 @@ import time
 import uuid
 from typing import Any, Protocol
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from mlsc.core.fetch.client import FetchClient
@@ -86,10 +87,11 @@ async def collect_source(
     source's quota caps its whole fan-out").
 
     The stats row is written on every outcome, including a stored config that
-    will not build and a transport failure — a run without its ledger row is
-    worse than a failed run, because every later surface would read the gap as a
-    measurement (requirement 5, design.md "Failure strategy"). ``SourceDisabled``
-    is the one failure that propagates: a disabled source is not part of the run.
+    will not build, a transport failure, and a document write that the database
+    rejects — a run without its ledger row is worse than a failed run, because
+    every later surface would read the gap as a measurement (requirement 5,
+    design.md "Failure strategy"). ``SourceDisabled`` is the one failure that
+    propagates: a disabled source is not part of the run.
     """
     clock = clock or _SystemClock()
     started_at = clock.monotonic()
@@ -143,28 +145,37 @@ async def collect_source(
         new_cursor = _newer_cursor(new_cursor, result.new_cursor)
 
     rows = _document_rows(source, items)
-
-    async with session_factory() as session:
-        kept = await DocumentRepository(session).insert_ignoring_duplicates(rows)
-        # A duplicate counts as persisted: the natural key means the row is
-        # already in the table, so the cursor may pass it. An error anywhere in
-        # the fan-out holds the cursor back entirely, because the adapters share
-        # one watermark and advancing it past a failed query's window would skip
-        # that query's older items on every run after this one (requirement 8).
-        if rows and error is None:
-            await MonitorSourceRepository(session).save_cursor(
-                source_id, **dataclasses.asdict(new_cursor)
-            )
-        await session.commit()
-
     attempted = len(rows)
+    # An error anywhere in the fan-out holds the cursor back entirely, because the
+    # adapters share one watermark and advancing it past a failed query's window
+    # would skip that query's older items on every run after this one
+    # (requirement 8).
+    cursor_to_save = None if error else new_cursor
+
+    try:
+        kept = await _persist_documents(
+            session_factory, rows=rows, source_id=source_id, new_cursor=cursor_to_save
+        )
+        duplicates = attempted - kept
+    except SQLAlchemyError as failure:
+        # A failed write is the fault worth naming even when the fan-out also
+        # failed, because nothing landed at all. Its class is the transport, not
+        # the payload's shape — the items were fine and the database was not — so
+        # this reads back as FAILED_TRANSPORT (requirements 5 and 6). Nothing
+        # persisted means nothing was a duplicate either: charging these rows to
+        # the natural key would report an outage as a quiet day (C5).
+        kept = 0
+        duplicates = 0
+        validation_failed = False
+        error = f"document write failed: {failure}"
+
     return await _write_stats(
         session_factory,
         run_id=run_id,
         source_id=source_id,
         attempted=attempted,
         fetched=attempted,
-        duplicates=attempted - kept,
+        duplicates=duplicates,
         kept=kept,
         quota=quota,
         quota_outcome=(
@@ -175,6 +186,34 @@ async def collect_source(
         duration_seconds=clock.monotonic() - started_at,
         error=error,
     )
+
+
+async def _persist_documents(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    rows: list[dict[str, Any]],
+    source_id: uuid.UUID,
+    new_cursor: Any,
+) -> int:
+    """Insert the run's rows and advance the cursor in the same transaction,
+    returning how many rows were written.
+
+    A duplicate counts as persisted: the natural key means the row is already in
+    the table, so the cursor may pass it. A caller with anything to hold the
+    cursor back for passes no cursor at all (requirement 8, design.md "Failure
+    strategy").
+
+    One transaction for both, so a write that fails part way leaves the cursor
+    where it was rather than pointing past items no row exists for.
+    """
+    async with session_factory() as session:
+        kept = await DocumentRepository(session).insert_ignoring_duplicates(rows)
+        if rows and new_cursor is not None:
+            await MonitorSourceRepository(session).save_cursor(
+                source_id, **dataclasses.asdict(new_cursor)
+            )
+        await session.commit()
+        return kept
 
 
 def _is_validation_failure(failure: Exception) -> bool:
