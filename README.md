@@ -50,4 +50,3 @@ conda run -n mlsc python -m pytest tests/
 ## Known gaps
 
 - Trend detection, insight generation, alert delivery, retention, and backfill are reachable only from the test suite — nothing calls them in production. Beat projects per-monitor runs and nothing else, so the weekly and monthly topic cadences do not run either.
-- `dispatch_run` implements the Google Play adapter only; every other source is reported as skipped.

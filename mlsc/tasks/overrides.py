@@ -32,6 +32,8 @@ from mlsc.llm.router import LlmRouter
 from mlsc.pipeline.analytics.buckets import bucket_for
 from mlsc.pipeline.enrich import Embedder, SentimentScorer
 from mlsc.pipeline.stages import Stage
+from mlsc.sources.news.extract import ArticleExtractor
+from mlsc.sources.news.resolve import RedirectResolver
 from mlsc.tasks.analytics import rollup_daily
 from mlsc.tasks.dispatch import collect_one_source
 from mlsc.tasks.enrich import enrich_documents
@@ -45,6 +47,8 @@ async def run_override(
     *,
     job_id: uuid.UUID,
     fetch_client: FetchClient,
+    resolver: RedirectResolver,
+    extractor: ArticleExtractor,
     embedder: Embedder,
     sentiment_scorer: SentimentScorer,
     llm_router: LlmRouter,
@@ -69,6 +73,8 @@ async def run_override(
             session_factory,
             fetch_client,
             monitor_id=monitor_id,
+            resolver=resolver,
+            extractor=extractor,
             window_start=date.fromisoformat(parameters["window_start"]),
             window_end=date.fromisoformat(parameters["window_end"]),
         )
@@ -160,6 +166,8 @@ async def _run_backfill_window(
     fetch_client: FetchClient,
     *,
     monitor_id: uuid.UUID,
+    resolver: RedirectResolver,
+    extractor: ArticleExtractor,
     window_start: date,
     window_end: date,
 ) -> tuple[OverrideStatus, dict[str, Any]]:
@@ -173,7 +181,9 @@ async def _run_backfill_window(
             run = await session.get(IngestionRun, run_id)
             source = await session.get(MonitorSource, source_id)
         try:
-            outcome = await collect_one_source(session_factory, fetch_client, run_id, source)
+            outcome = await collect_one_source(
+                session_factory, fetch_client, run_id, source, resolver, extractor
+            )
         except Exception as error:  # noqa: BLE001 - recorded, not raised: one date must not abort the window
             outcome = SourceOutcome(
                 source_id=source.id,

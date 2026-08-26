@@ -342,7 +342,9 @@ class TestBackfillWindow:
 
         calls = {"n": 0}
 
-        async def fake_collect_one_source(session_factory, fetch_client, run_id, source):  # noqa: ANN001
+        async def fake_collect_one_source(  # noqa: ANN001
+            session_factory, fetch_client, run_id, source, resolver, extractor
+        ):
             calls["n"] += 1
             if calls["n"] == 1:
                 return SourceOutcome(
@@ -361,6 +363,8 @@ class TestBackfillWindow:
                 session_factory,
                 fetch_client=None,
                 monitor_id=monitor_id,
+                resolver=None,
+                extractor=None,
                 window_start=date.today() - timedelta(days=2),
                 window_end=date.today() - timedelta(days=1),
             )

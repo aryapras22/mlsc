@@ -85,6 +85,8 @@ def dispatch_run(run_id: str) -> None:
     process-wide singleton, matching the pattern in `run_monitor` above."""
     import uuid
 
+    import httpx
+
     from mlsc.bootstrap import build_redis_client
     from mlsc.config import load_settings
     from mlsc.core.fetch.assembly import build_fetch_client
@@ -92,6 +94,8 @@ def dispatch_run(run_id: str) -> None:
     from mlsc.application.runs import RunService
     from mlsc.db.models import IngestionRun
     from mlsc.db.session import build_engine, build_session_factory
+    from mlsc.sources.news.extract import TrafilaturaExtractor
+    from mlsc.sources.news.resolve import HttpxRedirectResolver
     from mlsc.tasks.celery_dispatcher import CeleryDispatcher
     from mlsc.tasks.dispatch import dispatch_run as run_dispatch_pipeline
 
@@ -102,6 +106,11 @@ def dispatch_run(run_id: str) -> None:
     lock = RunLock(redis)
     run_service = RunService(session_factory, lock, CeleryDispatcher())
     fetch_client = build_fetch_client(redis)
+    # One httpx client for both: each does a plain GET against a publisher
+    # host, so a second connection pool would buy nothing.
+    news_http = httpx.AsyncClient()
+    resolver = HttpxRedirectResolver(news_http)
+    extractor = TrafilaturaExtractor(news_http)
     run_uuid = uuid.UUID(run_id)
 
     async def _run() -> None:
@@ -116,6 +125,8 @@ def dispatch_run(run_id: str) -> None:
             fetch_client=fetch_client,
             run_id=run_uuid,
             monitor_id=monitor_id,
+            resolver=resolver,
+            extractor=extractor,
         )
 
     asyncio.run(_run())
@@ -127,12 +138,16 @@ def run_override(job_id: str) -> None:
     process-wide singleton, matching the pattern in `dispatch_run` above."""
     import uuid
 
+    import httpx
+
     from mlsc.bootstrap import build_redis_client
     from mlsc.config import ConfigurationError, load_settings
     from mlsc.core.fetch.assembly import build_fetch_client
     from mlsc.db.session import build_engine, build_session_factory
     from mlsc.llm.router import LlmRouter
     from mlsc.pipeline.enrich import Embedder, SentimentScorer
+    from mlsc.sources.news.extract import TrafilaturaExtractor
+    from mlsc.sources.news.resolve import HttpxRedirectResolver
     from mlsc.tasks.overrides import run_override as run_override_job
 
     settings = load_settings()
@@ -140,6 +155,7 @@ def run_override(job_id: str) -> None:
     session_factory = build_session_factory(engine)
     redis = build_redis_client(settings.redis)
     fetch_client = build_fetch_client(redis)
+    news_http = httpx.AsyncClient()
 
     # Only a stage_rerun of the intent stage needs this, and the kind isn't
     # known until the job loads — unlike the daily pipeline, an unconfigured
@@ -155,6 +171,8 @@ def run_override(job_id: str) -> None:
             session_factory,
             job_id=uuid.UUID(job_id),
             fetch_client=fetch_client,
+            resolver=HttpxRedirectResolver(news_http),
+            extractor=TrafilaturaExtractor(news_http),
             embedder=Embedder(),
             sentiment_scorer=SentimentScorer(),
             llm_router=llm_router,

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from mlsc.application.runs import RunService, SourceOutcome, SourceResult
 from mlsc.core.fetch.client import FetchClient
-from mlsc.db.models import RunStatus, SourceName
+from mlsc.db.models import RunStatus
 from mlsc.sources.news.extract import ArticleExtractor
 from mlsc.sources.news.resolve import RedirectResolver
 from mlsc.tasks.ingest import SourceDisabled, collect_source
@@ -26,8 +26,8 @@ async def dispatch_run(
     fetch_client: FetchClient,
     run_id: uuid.UUID,
     monitor_id: uuid.UUID,
-    resolver: RedirectResolver | None = None,
-    extractor: ArticleExtractor | None = None,
+    resolver: RedirectResolver,
+    extractor: ArticleExtractor,
 ) -> None:
     sources = await run_service.enabled_sources(monitor_id)
 
@@ -116,19 +116,17 @@ async def _run_downstream_pipeline(
 
 
 async def collect_one_source(  # noqa: ANN001
-    session_factory, fetch_client, run_id, source, resolver=None, extractor=None
+    session_factory, fetch_client, run_id, source, resolver, extractor
 ) -> SourceOutcome:
-    # TODO: the news collaborators are optional only while this branch still
-    # skips every kind but Play, which needs neither of them. Both become
-    # required once the branch goes and the Celery entrypoint assembles them.
-    if source.source_name is not SourceName.PLAY:
-        return SourceOutcome(
-            source_id=source.id,
-            source_name=source.source_name.value,
-            result=SourceResult.SKIPPED_DISABLED,
-            error="only the play adapter is implemented",
-        )
+    """Collect one enabled source of any kind, returning its outcome as a value.
 
+    ``collect_source`` records an adapter or config failure on the source's
+    ledger row and returns rather than raising, so the ledger row is the
+    translation from ``SourceCollectionFailed`` into this outcome: a payload-shape
+    fault reads back as ``validation_failed`` and anything else as ``error``
+    (requirements 5 and 7). ``SourceDisabled`` is the only failure that reaches
+    here, and a disabled source is a real skip.
+    """
     try:
         stats = await collect_source(
             session_factory=session_factory,
