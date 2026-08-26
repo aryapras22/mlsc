@@ -22,6 +22,11 @@ from mlsc.sources.registry import register
 
 _HOST_KEY = "news.google.com"
 
+# A bare `q` param makes Google 302 to a locale-qualified URL instead of
+# serving the feed directly; supplying the locale up front avoids that
+# redirect (the guarded transport doesn't follow redirects) entirely.
+_LOCALE_PARAMS = (("hl", "en-US"), ("gl", "US"), ("ceid", "US:en"))
+
 
 @dataclasses.dataclass(frozen=True)
 class NewsCursor:
@@ -83,8 +88,9 @@ class NewsAdapter(SourceAdapter):
 
     @property
     def expectations(self) -> FetchExpectations:
-        # Confirmed against the live endpoint: application/xml once the client
-        # follows Google's redirect, application/binary if it does not.
+        # Confirmed against the live endpoint: including the locale params
+        # in the request avoids Google's redirect, so application/xml
+        # comes back on the first request.
         return FetchExpectations(content_type="application/xml", body_format="raw")
 
     async def fetch(self, entity: str, cursor: NewsCursor, quota: int) -> CollectionResult:
@@ -92,7 +98,7 @@ class NewsAdapter(SourceAdapter):
             url="https://news.google.com/rss/search",
             host_key=_HOST_KEY,
             client_profile=ClientProfile.PLAIN,
-            query=(("q", self._query),),
+            query=(("q", self._query), *_LOCALE_PARAMS),
         )
         outcome = await self._fetch_client.get(request, self.expectations)
         if outcome.status is not FetchStatus.OK:
@@ -146,7 +152,7 @@ class NewsAdapter(SourceAdapter):
             url="https://news.google.com/rss/search",
             host_key=_HOST_KEY,
             client_profile=ClientProfile.PLAIN,
-            query=(("q", query),),
+            query=(("q", query), *_LOCALE_PARAMS),
         )
         outcome = await self._fetch_client.get(request, self.expectations)
         if outcome.status is not FetchStatus.OK:
