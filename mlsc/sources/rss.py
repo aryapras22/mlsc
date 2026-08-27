@@ -57,7 +57,18 @@ class FeedAdapter(SourceAdapter):
 
     @property
     def expectations(self) -> FetchExpectations:
-        return FetchExpectations(content_type="application/xml", body_format="raw")
+        # Real feeds don't agree on one content type: confirmed live across
+        # application/xml, application/rss+xml, application/atom+xml, and
+        # text/xml. All four are honest XML; text/html is not, and still fails.
+        return FetchExpectations(
+            content_type=(
+                "application/xml",
+                "application/rss+xml",
+                "application/atom+xml",
+                "text/xml",
+            ),
+            body_format="raw",
+        )
 
     async def fetch(self, entity: str, cursor: FeedCursor, quota: int) -> CollectionResult:
         request = FetchRequest(

@@ -181,6 +181,21 @@ class TestValidator:
         items = validate(content_type="application/json", body=body, expectations=expectations())
         assert items == [{"id": "1"}, {"id": "2"}]
 
+    def test_content_type_accepts_any_declared_alternative(self) -> None:
+        multi = expectations(
+            content_type=("application/xml", "application/rss+xml", "text/xml"),
+            body_format="raw",
+        )
+        for served in ("application/rss+xml", "text/xml; charset=utf-8"):
+            validate(content_type=served, body=b"<rss/>", expectations=multi)
+
+    def test_content_type_rejects_anything_outside_the_declared_alternatives(self) -> None:
+        multi = expectations(
+            content_type=("application/xml", "application/rss+xml"), body_format="raw"
+        )
+        with pytest.raises(UnexpectedContentType):
+            validate(content_type="text/html", body=b"<html/>", expectations=multi)
+
 
 def batchexecute_body(inner_payload: Any) -> bytes:
     import json as _json

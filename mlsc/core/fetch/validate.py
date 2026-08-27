@@ -82,9 +82,15 @@ def _decode_google_batchexecute(body: bytes) -> Any:
 
 def _check_content_type(content_type: str, expectations: FetchExpectations) -> None:
     actual = content_type.split(";", 1)[0].strip().lower()
-    expected = expectations.content_type.strip().lower()
-    if actual != expected:
-        raise UnexpectedContentType(expected=expected, actual=actual)
+    declared = expectations.content_type
+    if isinstance(declared, str):
+        expected = declared.strip().lower()
+        if actual != expected:
+            raise UnexpectedContentType(expected=expected, actual=actual)
+        return
+    expected_set = tuple(value.strip().lower() for value in declared)
+    if actual not in expected_set:
+        raise UnexpectedContentType(expected=expected_set, actual=actual)
 
 
 def _walk_path(body: Any, path: tuple[str | int, ...]) -> list[Any]:

@@ -49,7 +49,12 @@ class FetchExpectations:
     positional arrays, not objects with named keys.
     """
 
-    content_type: str
+    content_type: str | tuple[str, ...]
+    """A single acceptable value, or a tuple of them. A tuple is for sources that
+    serve one payload under genuinely different labels — real RSS/Atom feeds split
+    across ``application/xml``, ``application/rss+xml``, ``application/atom+xml``,
+    and ``text/xml`` depending on host, none of them wrong. JSON APIs don't have
+    this problem, so every other adapter still passes a plain string."""
     item_path: tuple[str | int, ...] = ()
     required_fields: tuple[str, ...] = ()
     min_rows_when_healthy: int = 0
@@ -102,7 +107,7 @@ class FetchGuardrailError(RuntimeError):
 
 @dataclass
 class UnexpectedContentType(FetchGuardrailError):
-    expected: str
+    expected: str | tuple[str, ...]
     actual: str
 
     def __str__(self) -> str:
