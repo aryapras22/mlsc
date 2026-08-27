@@ -457,6 +457,45 @@ class OverrideJob(Base):
     outcome: Mapped[dict | None] = mapped_column(JSONB)
 
 
+class ThemeJobKind(str, Enum):
+    QUERY_GENERATION = "query_generation"
+    DISCOVERY = "discovery"
+
+
+class ThemeJobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class ThemeJob(Base):
+    """One request to generate a theme's queries or run discovery, tracked
+    as a durable row rather than left to Celery's own task state — a user
+    polling "did this finish" needs a row keyed by monitor and kind, which
+    Celery's result backend does not give (query-driven-sources design.md,
+    "The async job table").
+
+    Carries no result payload: what it produced lives in ``ThemeSeed`` or
+    ``EntityCandidate``, which already existed before this table. The job
+    row only answers whether the work finished and how.
+    """
+
+    __tablename__ = "theme_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[ThemeJobKind]
+    status: Mapped[ThemeJobStatus] = mapped_column(default=ThemeJobStatus.PENDING)
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None]
+
+
 class Document(Base):
     """One collected item. Author identity is a hash; nothing else identifies who wrote it.
 
