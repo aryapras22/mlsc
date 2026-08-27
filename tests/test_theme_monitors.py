@@ -17,7 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 
 from mlsc.application.monitors import MonitorService
 from mlsc.application.sources import MonitorSourceService
-from mlsc.application.themes import CandidateNotViable, ReviewedQuery, ThemeService
+from mlsc.application.themes import (
+    CandidateNotViable,
+    NotAThemeMonitor,
+    ReviewedQuery,
+    ThemeJobOverlaps,
+    ThemeJobService,
+    ThemeService,
+)
 from mlsc.db.models import (
     Base,
     CandidateState,
@@ -29,13 +36,16 @@ from mlsc.db.models import (
     RelevanceBasis,
     SourceName,
     TargetType,
+    ThemeJob,
+    ThemeJobKind,
+    ThemeJobStatus,
     ThemeSeed,
 )
 from mlsc.llm.base import Completion
 from mlsc.pipeline.normalize import hash_content
 from mlsc.pipeline.relevance import ThemeRelevanceScorer
 from mlsc.pipeline.themes import GeneratedQuery, GeneratedQuerySet, QueriesUnusable, generate_theme_queries
-from mlsc.repositories.themes import EntityCandidateRepository, ThemeSeedRepository
+from mlsc.repositories.themes import EntityCandidateRepository, ThemeJobRepository, ThemeSeedRepository
 from mlsc.schemas.monitors import MonitorCreateRequest
 from mlsc.schemas.sources import MonitorSourceCreateRequest
 from mlsc.tasks.enrich import Stage, ThemeRelevanceContext, enrich_documents
@@ -120,6 +130,31 @@ async def _make_theme_monitor(session_factory: async_sessionmaker, *, descriptio
         )
     )
     return monitor.id
+
+
+async def _make_product_monitor(session_factory: async_sessionmaker) -> uuid.UUID:
+    monitor = await MonitorService(session_factory).create(
+        MonitorCreateRequest(
+            name="Roblox",
+            target_type=TargetType.PRODUCT,
+            seed={"identifiers": ["com.roblox.client"]},
+            cron_expression="0 3 * * *",
+            timezone="UTC",
+            retention_days=90,
+        )
+    )
+    return monitor.id
+
+
+class FakeDispatcher:
+    """A no-op ``ThemeDispatcher``: these tests exercise the service's own
+    guard and job-row logic, not the Celery entrypoint task 5 wired up."""
+
+    def __init__(self) -> None:
+        self.dispatched: list[uuid.UUID] = []
+
+    def dispatch_theme_job(self, job_id: uuid.UUID) -> None:
+        self.dispatched.append(job_id)
 
 
 async def _add_document(
@@ -207,6 +242,93 @@ class TestQueryGeneration:
         seed = run(load_seed())
         assert [q["text"] for q in seed.queries] == ["ai note taking app"]
         assert all(q["accepted"] for q in seed.queries)
+
+
+class TestThemeJobService:
+    @pytest.mark.parametrize("kind", [ThemeJobKind.QUERY_GENERATION, ThemeJobKind.DISCOVERY])
+    def test_a_second_submission_of_the_same_kind_is_refused(
+        self, session_factory: async_sessionmaker, kind: ThemeJobKind
+    ) -> None:
+        monitor_id = run(_make_theme_monitor(session_factory, description="note-taking apps"))
+        service = ThemeJobService(session_factory, FakeDispatcher())
+        submit = service.submit_generation if kind is ThemeJobKind.QUERY_GENERATION else service.submit_discovery
+
+        first_job_id = run(submit(monitor_id))
+
+        with pytest.raises(ThemeJobOverlaps) as excinfo:
+            run(submit(monitor_id))
+        assert excinfo.value.job_id == first_job_id
+
+    def test_generation_and_discovery_do_not_overlap_each_other(
+        self, session_factory: async_sessionmaker
+    ) -> None:
+        monitor_id = run(_make_theme_monitor(session_factory, description="note-taking apps"))
+        service = ThemeJobService(session_factory, FakeDispatcher())
+
+        run(service.submit_generation(monitor_id))
+
+        run(service.submit_discovery(monitor_id))  # different kind: must not raise
+
+    @pytest.mark.parametrize("kind", [ThemeJobKind.QUERY_GENERATION, ThemeJobKind.DISCOVERY])
+    def test_a_product_monitor_is_rejected(
+        self, session_factory: async_sessionmaker, kind: ThemeJobKind
+    ) -> None:
+        monitor_id = run(_make_product_monitor(session_factory))
+        service = ThemeJobService(session_factory, FakeDispatcher())
+        submit = service.submit_generation if kind is ThemeJobKind.QUERY_GENERATION else service.submit_discovery
+
+        with pytest.raises(NotAThemeMonitor):
+            run(submit(monitor_id))
+
+    @pytest.mark.parametrize("kind", [ThemeJobKind.QUERY_GENERATION, ThemeJobKind.DISCOVERY])
+    def test_a_job_reaches_complete_with_the_submitted_id_intact(
+        self, session_factory: async_sessionmaker, kind: ThemeJobKind
+    ) -> None:
+        monitor_id = run(_make_theme_monitor(session_factory, description="note-taking apps"))
+        service = ThemeJobService(session_factory, FakeDispatcher())
+        submit = service.submit_generation if kind is ThemeJobKind.QUERY_GENERATION else service.submit_discovery
+
+        job_id = run(submit(monitor_id))
+
+        async def drive_to_complete() -> ThemeJob:
+            async with session_factory() as session:
+                jobs = ThemeJobRepository(session)
+                job = await jobs.get(job_id)
+                await jobs.mark_running(job)
+                await jobs.mark_complete(job)
+                await session.commit()
+                return await jobs.get(job_id)
+
+        job = run(drive_to_complete())
+        assert job.id == job_id
+        assert job.status is ThemeJobStatus.COMPLETE
+        assert job.finished_at is not None
+        assert job.error is None
+
+    @pytest.mark.parametrize("kind", [ThemeJobKind.QUERY_GENERATION, ThemeJobKind.DISCOVERY])
+    def test_a_job_reaches_failed_with_its_error_recorded(
+        self, session_factory: async_sessionmaker, kind: ThemeJobKind
+    ) -> None:
+        monitor_id = run(_make_theme_monitor(session_factory, description="note-taking apps"))
+        service = ThemeJobService(session_factory, FakeDispatcher())
+        submit = service.submit_generation if kind is ThemeJobKind.QUERY_GENERATION else service.submit_discovery
+
+        job_id = run(submit(monitor_id))
+
+        async def drive_to_failed() -> ThemeJob:
+            async with session_factory() as session:
+                jobs = ThemeJobRepository(session)
+                job = await jobs.get(job_id)
+                await jobs.mark_running(job)
+                await jobs.mark_failed(job, "no usable queries")
+                await session.commit()
+                return await jobs.get(job_id)
+
+        job = run(drive_to_failed())
+        assert job.id == job_id
+        assert job.status is ThemeJobStatus.FAILED
+        assert job.finished_at is not None
+        assert job.error == "no usable queries"
 
 
 class TestCandidateReview:
