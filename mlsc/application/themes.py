@@ -1,23 +1,28 @@
-"""Theme monitor use cases: query review and candidate acceptance/rejection.
+"""Theme monitor use cases: job submission, query review, and candidate
+acceptance/rejection.
 
-Query generation and discovery themselves are enqueued tasks
-(``mlsc/tasks/themes.py``); this module holds the user-facing decisions that
-happen between and after those passes — requirements 2 and 4.
+``ThemeJobService`` submits generation and discovery as jobs rather than
+running them inline (requirements 1, 4, 8, 9); ``ThemeService`` holds the
+user-facing decisions that happen between and after those passes —
+requirements 2 and 4.
 """
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import Protocol
 
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from mlsc.application.sources import MonitorSourceService
-from mlsc.db.models import CandidateState, DiscoverySurface, SourceName
+from mlsc.db.models import CandidateState, DiscoverySurface, SourceName, TargetType, ThemeJobKind
+from mlsc.repositories.monitors import MonitorRepository
 from mlsc.repositories.themes import (
     EntityCandidateNotFound,
     EntityCandidateRepository,
+    ThemeJobRepository,
     ThemeSeedRepository,
 )
 from mlsc.schemas.sources import MonitorSourceCreateRequest
@@ -48,6 +53,33 @@ class CandidateNotViable(RuntimeError):
     def __init__(self, candidate_id: uuid.UUID, reason: str) -> None:
         super().__init__(f"candidate {candidate_id} could not be attached: {reason}")
         self.candidate_id = candidate_id
+
+
+class NotAThemeMonitor(RuntimeError):
+    """Raised when generation or discovery is requested for a monitor whose
+    ``target_type`` is not ``THEME`` — a product monitor has no seed to
+    generate queries from (requirement 8; design.md, "Failure strategy")."""
+
+    def __init__(self, monitor_id: uuid.UUID) -> None:
+        super().__init__(str(monitor_id))
+        self.monitor_id = monitor_id
+
+
+class ThemeJobOverlaps(RuntimeError):
+    """Raised when a generation or discovery job of the same kind is already
+    in flight for this monitor. Carries the running job's id, matching
+    ``OverrideOverlaps``'s shape exactly (requirement 9)."""
+
+    def __init__(self, job_id: uuid.UUID) -> None:
+        super().__init__(str(job_id))
+        self.job_id = job_id
+
+
+class ThemeDispatcher(Protocol):
+    """Injected so this service never imports Celery directly (design.md,
+    "Dependencies, injected")."""
+
+    def dispatch_theme_job(self, job_id: uuid.UUID) -> None: ...
 
 
 class ThemeService:
@@ -125,6 +157,46 @@ class ThemeService:
             candidate.state = CandidateState.REJECTED
             candidate.reviewed_at = datetime.now(timezone.utc)
             await session.commit()
+
+
+class ThemeJobService:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        dispatcher: ThemeDispatcher,
+    ) -> None:
+        self._session_factory = session_factory
+        self._dispatcher = dispatcher
+
+    async def submit_generation(self, monitor_id: uuid.UUID) -> uuid.UUID:
+        """Requirement 1: returns an identifier for the work rather than the
+        queries themselves — generation calls an LLM, and C12 forbids doing
+        that inline (design.md, "Success path")."""
+        return await self._submit(monitor_id, ThemeJobKind.QUERY_GENERATION)
+
+    async def submit_discovery(self, monitor_id: uuid.UUID) -> uuid.UUID:
+        """Requirement 4: same guard and job shape as generation — discovery
+        calls several third-party surfaces, so it is enqueued for the same
+        C12 reason (design.md, "Success path")."""
+        return await self._submit(monitor_id, ThemeJobKind.DISCOVERY)
+
+    async def _submit(self, monitor_id: uuid.UUID, kind: ThemeJobKind) -> uuid.UUID:
+        async with self._session_factory() as session:
+            monitor = await MonitorRepository(session).get(monitor_id)
+            if monitor.target_type is not TargetType.THEME:
+                raise NotAThemeMonitor(monitor_id)
+
+            jobs = ThemeJobRepository(session)
+            in_flight = await jobs.find_in_flight(monitor_id, kind)
+            if in_flight is not None:
+                raise ThemeJobOverlaps(in_flight.id)
+
+            job = await jobs.create_pending(monitor_id, kind)
+            await session.commit()
+            job_id = job.id
+
+        self._dispatcher.dispatch_theme_job(job_id)
+        return job_id
 
 
 def _config_for(source_name: SourceName, entity_ref: str) -> dict:
