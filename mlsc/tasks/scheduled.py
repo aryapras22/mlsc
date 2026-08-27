@@ -180,6 +180,96 @@ def run_override(job_id: str) -> None:
     )
 
 
+@app.task(name="mlsc.run_theme_job")
+def run_theme_job(job_id: str) -> None:
+    """Celery entrypoint. Builds its own dependencies rather than importing a
+    process-wide singleton, matching the pattern in `run_override` above."""
+    import uuid
+
+    import httpx
+
+    from mlsc.bootstrap import build_redis_client
+    from mlsc.config import ConfigurationError, load_settings
+    from mlsc.core.fetch.assembly import build_fetch_client
+    from mlsc.db.models import ThemeJobKind
+    from mlsc.db.session import build_engine, build_session_factory
+    from mlsc.llm.router import LlmRouter
+    from mlsc.pipeline.themes import QueriesUnusable
+    from mlsc.repositories.themes import ThemeJobRepository
+    from mlsc.sources.news.extract import TrafilaturaExtractor
+    from mlsc.sources.news.resolve import HttpxRedirectResolver
+    from mlsc.tasks.themes import run_discovery, run_query_generation
+
+    settings = load_settings()
+    engine = build_engine(settings.postgres)
+    session_factory = build_session_factory(engine)
+    redis = build_redis_client(settings.redis)
+    fetch_client = build_fetch_client(redis)
+    # Only the discovery branch needs these, but the kind isn't known until
+    # the job loads, so they are built unconditionally — the same tolerance
+    # `dispatch_run` already applies regardless of which sources a run has.
+    news_http = httpx.AsyncClient()
+    resolver = HttpxRedirectResolver(news_http)
+    extractor = TrafilaturaExtractor(news_http)
+
+    # generate_theme_queries takes no None router (mlsc.pipeline.themes) —
+    # unlike run_override's stage_rerun tolerance for the same condition, an
+    # unconfigured tier here must fail the job outright rather than reach
+    # that call with None and record a TypeError as the "error".
+    try:
+        llm_router: LlmRouter | None = LlmRouter.from_configuration()
+    except ConfigurationError:
+        llm_router = None
+
+    job_uuid = uuid.UUID(job_id)
+
+    async def _run() -> None:
+        async with session_factory() as session:
+            repository = ThemeJobRepository(session)
+            job = await repository.get(job_uuid)
+            monitor_id, kind = job.monitor_id, job.kind
+            await repository.mark_running(job)
+            await session.commit()
+
+        async def _fail(reason: str) -> None:
+            async with session_factory() as session:
+                repository = ThemeJobRepository(session)
+                job = await repository.get(job_uuid)
+                await repository.mark_failed(job, reason)
+                await session.commit()
+
+        if kind is ThemeJobKind.QUERY_GENERATION and llm_router is None:
+            await _fail("no LLM provider configured for query generation")
+            return
+
+        try:
+            if kind is ThemeJobKind.QUERY_GENERATION:
+                await run_query_generation(session_factory, monitor_id=monitor_id, llm_router=llm_router)
+            else:
+                await run_discovery(
+                    session_factory, monitor_id=monitor_id, fetch_client=fetch_client,
+                    resolver=resolver, extractor=extractor,
+                )
+        except QueriesUnusable as error:
+            # run_query_generation's documented failure mode (mlsc/tasks/themes.py):
+            # the seed keeps its previous queries, and this entrypoint is the
+            # caller responsible for surfacing the failure.
+            await _fail(str(error))
+            return
+        except Exception as error:  # noqa: BLE001 - a job stuck at RUNNING forever is worse than one marked FAILED with a generic reason
+            logger.exception("theme job %s failed", job_id)
+            await _fail(str(error))
+            return
+
+        async with session_factory() as session:
+            repository = ThemeJobRepository(session)
+            job = await repository.get(job_uuid)
+            await repository.mark_complete(job)
+            await session.commit()
+
+    asyncio.run(_run())
+
+
 @app.task(name="mlsc.run_alert_delivery")
 def run_alert_delivery() -> int:
     """Celery entrypoint. Builds its own dependencies rather than importing a
