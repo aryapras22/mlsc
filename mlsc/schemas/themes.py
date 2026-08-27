@@ -57,6 +57,15 @@ class ReviewQueriesRequest(BaseModel):
     queries: list[ReviewedQueryItem]
 
 
+class ThemeJobSubmitResponse(BaseModel):
+    """Returned by both job-submitting routes, matching
+    ``OverrideSubmitResponse``'s exact shape (design.md, "Success path") —
+    the caller gets an id to poll, not the generated queries or discovered
+    candidates inline (C12)."""
+
+    job_id: uuid.UUID
+
+
 class CandidateResponse(BaseModel):
     id: uuid.UUID
     monitor_id: uuid.UUID
@@ -71,6 +80,14 @@ class CandidateResponse(BaseModel):
     reviewed_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class CandidateAcceptResponse(BaseModel):
+    """Returned by the accept route: the id of the source the candidate
+    became, so a client can navigate straight to it without a second
+    ``GET /monitors/{id}/sources`` call."""
+
+    source_id: uuid.UUID
 
 
 class ThemeJobResponse(BaseModel):

@@ -87,6 +87,16 @@ class ThemeService:
         self._session_factory = session_factory
         self._sources = MonitorSourceService(session_factory)
 
+    async def get_queries(self, monitor_id: uuid.UUID) -> list[dict]:
+        """Requirement 2: the current query set, whatever produced it. Reads
+        the seed's raw ``queries`` JSONB rather than converting to a schema
+        here — the router owns that conversion, matching how
+        ``list_candidates`` below returns ORM rows rather than
+        ``CandidateResponse``."""
+        async with self._session_factory() as session:
+            seed = await ThemeSeedRepository(session).get_by_monitor(monitor_id)
+            return seed.queries
+
     async def review_queries(
         self, monitor_id: uuid.UUID, queries: list[ReviewedQuery]
     ) -> None:
