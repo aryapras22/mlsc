@@ -8,11 +8,22 @@ application service owns the transaction boundary, matching
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mlsc.db.models import CandidateState, EntityCandidate, SourceName, ThemeSeed
+from mlsc.db.models import (
+    CandidateState,
+    EntityCandidate,
+    SourceName,
+    ThemeJob,
+    ThemeJobKind,
+    ThemeJobStatus,
+    ThemeSeed,
+)
+
+_IN_FLIGHT = (ThemeJobStatus.PENDING, ThemeJobStatus.RUNNING)
 
 
 class ThemeSeedNotFound(KeyError):
@@ -29,6 +40,14 @@ class EntityCandidateNotFound(KeyError):
     def __init__(self, candidate_id: uuid.UUID) -> None:
         super().__init__(str(candidate_id))
         self.candidate_id = candidate_id
+
+
+class ThemeJobNotFound(KeyError):
+    """Raised when a ``job_id`` does not resolve to a stored job."""
+
+    def __init__(self, job_id: uuid.UUID) -> None:
+        super().__init__(str(job_id))
+        self.job_id = job_id
 
 
 class ThemeSeedRepository:
@@ -120,3 +139,47 @@ class EntityCandidateRepository:
         existing = result.scalar_one_or_none()
         if existing is None:
             self._session.add(candidate)
+
+
+class ThemeJobRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, job_id: uuid.UUID) -> ThemeJob:
+        job = await self._session.get(ThemeJob, job_id, populate_existing=True)
+        if job is None:
+            raise ThemeJobNotFound(job_id)
+        return job
+
+    async def find_in_flight(
+        self, monitor_id: uuid.UUID, kind: ThemeJobKind
+    ) -> ThemeJob | None:
+        """Requirement 9: a second request for the same monitor and kind is
+        rejected while a job is still ``PENDING`` or ``RUNNING``."""
+        result = await self._session.execute(
+            select(ThemeJob).where(
+                ThemeJob.monitor_id == monitor_id,
+                ThemeJob.kind == kind,
+                ThemeJob.status.in_(_IN_FLIGHT),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def create_pending(self, monitor_id: uuid.UUID, kind: ThemeJobKind) -> ThemeJob:
+        job = ThemeJob(
+            id=uuid.uuid4(), monitor_id=monitor_id, kind=kind, status=ThemeJobStatus.PENDING
+        )
+        self._session.add(job)
+        return job
+
+    async def mark_running(self, job: ThemeJob) -> None:
+        job.status = ThemeJobStatus.RUNNING
+
+    async def mark_complete(self, job: ThemeJob) -> None:
+        job.status = ThemeJobStatus.COMPLETE
+        job.finished_at = datetime.now(timezone.utc)
+
+    async def mark_failed(self, job: ThemeJob, error: str) -> None:
+        job.status = ThemeJobStatus.FAILED
+        job.finished_at = datetime.now(timezone.utc)
+        job.error = error
