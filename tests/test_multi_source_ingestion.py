@@ -95,6 +95,12 @@ def appstore_response(entries: list[dict[str, Any]]) -> TransportResponse:
     return TransportResponse(200, "text/javascript", body, "fixture/1")
 
 
+def appstore_exhausted_response() -> TransportResponse:
+    """Apple's actual shape for a page past the last review: no ``entry`` key at all."""
+    body = json.dumps({"feed": {"author": {}, "updated": {}, "title": {}}}).encode()
+    return TransportResponse(200, "text/javascript", body, "fixture/1")
+
+
 def appstore_entry(review_id: str, rating: int = 4) -> dict[str, Any]:
     return {
         "id": {"label": review_id},
@@ -125,6 +131,16 @@ class TestAppStoreAdapter:
         result = run(adapter.fetch("123", AppStoreCursor(last_external_id="seen"), quota=10))
 
         assert [r.external_id for r in result.reviews] == ["new-1"]
+
+    def test_missing_entry_on_later_page_ends_pagination_cleanly(self) -> None:
+        entries = [appstore_entry(f"r{i}") for i in range(2)]
+        transport = FakeTransport([appstore_response(entries), appstore_exhausted_response()])
+        adapter = AppStoreAdapter(build_client(transport))
+
+        result = run(adapter.fetch("123", AppStoreCursor(), quota=10))
+
+        assert [r.external_id for r in result.reviews] == ["r0", "r1"]
+        assert result.quota_reached is False
 
     def test_wrong_content_type_raises(self) -> None:
         transport = FakeTransport(

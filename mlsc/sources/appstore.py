@@ -6,7 +6,14 @@ import dataclasses
 from datetime import datetime
 from typing import Any
 
-from mlsc.core.fetch.contracts import ClientProfile, FetchExpectations, FetchRequest, FetchStatus
+from mlsc.core.fetch.contracts import (
+    ClientProfile,
+    FetchExpectations,
+    FetchOutcome,
+    FetchRequest,
+    FetchStatus,
+    MissingRequiredFields,
+)
 from mlsc.sources.base import SourceAdapter
 from mlsc.sources.registry import register
 
@@ -80,6 +87,8 @@ class AppStoreAdapter(SourceAdapter):
             request = _build_request(entity, page)
             outcome = await self._fetch_client.get(request, self.expectations)
             if outcome.status is not FetchStatus.OK:
+                if page > 1 and _is_exhausted_pagination(outcome):
+                    break
                 raise AppStoreCollectionFailed(outcome.status, outcome.payload)
 
             entries = outcome.payload
@@ -131,6 +140,19 @@ def _parse_search_result(entry: dict[str, Any]) -> AppStoreSearchResult:
         seller_name=entry.get("sellerName", ""),
         description=entry.get("description", ""),
     )
+
+
+def _is_exhausted_pagination(outcome: FetchOutcome) -> bool:
+    """True when a page failed validation because Apple omitted ``entry`` entirely.
+
+    Apple's customer-reviews feed drops the ``entry`` key rather than returning
+    ``"entry": []`` once a page runs past the last review, so this is the
+    feed's own end-of-pages signal, not a broken response.
+    """
+    if outcome.status is not FetchStatus.VALIDATION_FAILED:
+        return False
+    payload = outcome.payload
+    return isinstance(payload, MissingRequiredFields) and payload.missing == ("entry",)
 
 
 def _build_request(app_id: str, page: int) -> FetchRequest:
