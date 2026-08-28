@@ -85,6 +85,37 @@ describe("attaching a source", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("is not a well-formed Play package identifier");
     expect(screen.getByLabelText("Package id")).toHaveValue("not-a-package");
   });
+
+  it("sends both base_url and queries for a discourse source", async () => {
+    let sentBody: unknown;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string | URL, init?: RequestInit) => {
+        const path = url.toString();
+        const method = init?.method ?? "GET";
+        if (method === "POST" && path.includes("/sources")) {
+          sentBody = JSON.parse(init!.body as string);
+          return toResponse({ id: "s1" });
+        }
+        if (path.includes("/sources")) return toResponse([]);
+        if (path.includes("/overrides")) return toResponse([]);
+        if (path.includes("/runs")) return toResponse([]);
+        return toResponse({ detail: `no fixture for ${method} ${path}` }, { ok: false, status: 404 });
+      })
+    );
+
+    renderAtRoute(<SettingsPage />, ROUTE);
+
+    await userEvent.selectOptions(document.getElementById("source-kind")!, "discourse");
+    await userEvent.type(screen.getByLabelText("Forum base URL"), "https://devforum.roblox.com");
+    await userEvent.type(screen.getByLabelText("Queries (comma separated)"), "voice chat, latency");
+    await userEvent.click(screen.getByRole("button", { name: "Attach source" }));
+
+    await vi.waitFor(() => expect(sentBody).toBeDefined());
+    expect(sentBody).toMatchObject({
+      config: { base_url: "https://devforum.roblox.com", queries: ["voice chat", "latency"] },
+    });
+  });
 });
 
 describe("starting a run with no enabled source", () => {

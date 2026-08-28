@@ -30,26 +30,39 @@ const CONFIG_FIELD: Record<SourceName, { label: string; placeholder: string }> =
   hackernews: { label: "Queries (comma separated)", placeholder: "roblox" },
 };
 
+const DISCOURSE_QUERIES_FIELD = { label: "Queries (comma separated)", placeholder: "voice chat, latency" };
+
+/** Shared by every kind that takes a comma-separated query list
+ * (mlsc/schemas/sources.py's `_validated_queries` mirrors this on the
+ * server side). */
+function splitQueries(input: string): string[] {
+  return input
+    .split(",")
+    .map((query) => query.trim())
+    .filter(Boolean);
+}
+
 /** The shape each kind's config needs (mlsc/schemas/sources.py, the
- * per-kind validators `instance_key_for` dispatches to). */
-function buildSourceConfig(sourceName: SourceName, configInput: string): SourceCreate["config"] {
+ * per-kind validators `instance_key_for` dispatches to). Discourse needs
+ * both a base URL and its queries, so it takes the second input's value
+ * alongside `configInput`. */
+function buildSourceConfig(
+  sourceName: SourceName,
+  configInput: string,
+  discourseQueries: string
+): SourceCreate["config"] {
   switch (sourceName) {
     case "play":
       return { package_id: configInput.trim() };
     case "appstore":
       return { app_id: configInput.trim() };
     case "discourse":
-      return { base_url: configInput.trim() };
+      return { base_url: configInput.trim(), queries: splitQueries(discourseQueries) };
     case "rss":
       return { feed_url: configInput.trim() };
     case "news":
     case "hackernews":
-      return {
-        queries: configInput
-          .split(",")
-          .map((query) => query.trim())
-          .filter(Boolean),
-      };
+      return { queries: splitQueries(configInput) };
   }
 }
 
@@ -79,6 +92,7 @@ export function SettingsPage() {
 function AttachSourceForm({ monitorId }: { monitorId: string }) {
   const [sourceName, setSourceName] = useState<SourceName>("play");
   const [configInput, setConfigInput] = useState("");
+  const [discourseQueries, setDiscourseQueries] = useState("");
   const [dailyQuota, setDailyQuota] = useState(300);
   const attach = useAttachSource(monitorId);
   const field = CONFIG_FIELD[sourceName];
@@ -91,11 +105,16 @@ function AttachSourceForm({ monitorId }: { monitorId: string }) {
         attach.mutate(
           {
             source_name: sourceName,
-            config: buildSourceConfig(sourceName, configInput),
+            config: buildSourceConfig(sourceName, configInput, discourseQueries),
             daily_quota: dailyQuota,
             enabled: true,
           },
-          { onSuccess: () => setConfigInput("") }
+          {
+            onSuccess: () => {
+              setConfigInput("");
+              setDiscourseQueries("");
+            },
+          }
         );
       }}
     >
@@ -124,6 +143,20 @@ function AttachSourceForm({ monitorId }: { monitorId: string }) {
         placeholder={field.placeholder}
         required
       />
+
+      {sourceName === "discourse" && (
+        <>
+          <label htmlFor="source-discourse-queries">{DISCOURSE_QUERIES_FIELD.label}</label>
+          <input
+            id="source-discourse-queries"
+            className="border px-2 py-1"
+            value={discourseQueries}
+            onChange={(event) => setDiscourseQueries(event.target.value)}
+            placeholder={DISCOURSE_QUERIES_FIELD.placeholder}
+            required
+          />
+        </>
+      )}
 
       <label htmlFor="source-quota">Daily quota</label>
       <input
