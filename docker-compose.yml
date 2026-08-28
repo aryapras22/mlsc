@@ -34,6 +34,17 @@ x-app-env: &app-env
   MLSC_REDIS_PASSWORD: ${MLSC_LOCAL_REDIS_PASSWORD:?set MLSC_LOCAL_REDIS_PASSWORD in your local env file}
   MLSC_REDIS_USE_TLS: "false"
   CELERY_BROKER_URL: redis://:${MLSC_LOCAL_REDIS_PASSWORD:?set MLSC_LOCAL_REDIS_PASSWORD in your local env file}@redis:6379/0
+  # Optional: unset means LlmRouter.from_configuration() raises ConfigurationError
+  # for this tier, which mlsc.run_theme_job already treats as a clean job failure
+  # rather than a crash (query-driven-sources design.md).
+  MLSC_LLM_LABELING_BASE_URL: ${MLSC_LLM_LABELING_BASE_URL:-}
+  MLSC_LLM_LABELING_MODEL: ${MLSC_LLM_LABELING_MODEL:-}
+  # LlmRouter.from_configuration() configures every tier or none — the three
+  # pass through together for that reason, not because this task needs all of them.
+  MLSC_LLM_INTENT_BASE_URL: ${MLSC_LLM_INTENT_BASE_URL:-}
+  MLSC_LLM_INTENT_MODEL: ${MLSC_LLM_INTENT_MODEL:-}
+  MLSC_LLM_INSIGHT_BASE_URL: ${MLSC_LLM_INSIGHT_BASE_URL:-}
+  MLSC_LLM_INSIGHT_MODEL: ${MLSC_LLM_INSIGHT_MODEL:-}
 
 services:
   postgres:
