@@ -23,7 +23,7 @@ from mlsc.sources.appstore import AppStoreAdapter, AppStoreCollectionFailed, App
 from mlsc.sources.discourse import DiscourseAdapter, DiscourseCursor
 from mlsc.sources.hackernews import HackerNewsAdapter, HackerNewsCursor
 from mlsc.sources.news.adapter import NewsAdapter, NewsCursor
-from mlsc.sources.news.extract import UnextractableArticle
+from mlsc.sources.news.extract import TrafilaturaExtractor, UnextractableArticle
 from mlsc.sources.news.resolve import UnresolvableRedirect
 from mlsc.sources.rss import FeedAdapter, FeedCursor, MalformedFeed
 
@@ -263,3 +263,29 @@ class TestNewsAdapter:
         assert len(result.articles) == 1
         assert result.articles[0].text == "article body text"
         assert result.filtered == 0
+
+
+class TestTrafilaturaExtractor:
+    def test_wrong_content_type_becomes_unextractable_article(self) -> None:
+        transport = FakeTransport(
+            [TransportResponse(200, "application/json", b"{}", "fixture/1")]
+        )
+        extractor = TrafilaturaExtractor(build_client(transport))
+
+        with pytest.raises(UnextractableArticle):
+            run(extractor.extract("https://publisher.test/article"))
+
+    def test_breaker_open_becomes_unextractable_article_same_as_validation_failure(self) -> None:
+        """A skipped-breaker-open fetch must look identical to NewsAdapter as a
+        validation failure — both are just "this article was not usable"."""
+        client = build_client(FakeTransport([]))
+        extractor = TrafilaturaExtractor(client)
+
+        async def _open_breaker() -> None:
+            for _ in range(3):
+                await client._breaker.record_failure("publisher.test")
+
+        run(_open_breaker())
+
+        with pytest.raises(UnextractableArticle):
+            run(extractor.extract("https://publisher.test/article"))

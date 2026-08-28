@@ -106,11 +106,11 @@ def dispatch_run(run_id: str) -> None:
     lock = RunLock(redis)
     run_service = RunService(session_factory, lock, CeleryDispatcher())
     fetch_client = build_fetch_client(redis)
-    # One httpx client for both: each does a plain GET against a publisher
-    # host, so a second connection pool would buy nothing.
+    # Only the redirect hop still needs its own httpx client; article
+    # extraction now goes through fetch_client (fetch-guardrails design.md).
     news_http = httpx.AsyncClient()
     resolver = HttpxRedirectResolver(news_http)
-    extractor = TrafilaturaExtractor(news_http)
+    extractor = TrafilaturaExtractor(fetch_client)
     run_uuid = uuid.UUID(run_id)
 
     async def _run() -> None:
@@ -172,7 +172,7 @@ def run_override(job_id: str) -> None:
             job_id=uuid.UUID(job_id),
             fetch_client=fetch_client,
             resolver=HttpxRedirectResolver(news_http),
-            extractor=TrafilaturaExtractor(news_http),
+            extractor=TrafilaturaExtractor(fetch_client),
             embedder=Embedder(),
             sentiment_scorer=SentimentScorer(),
             llm_router=llm_router,
@@ -210,7 +210,7 @@ def run_theme_job(job_id: str) -> None:
     # `dispatch_run` already applies regardless of which sources a run has.
     news_http = httpx.AsyncClient()
     resolver = HttpxRedirectResolver(news_http)
-    extractor = TrafilaturaExtractor(news_http)
+    extractor = TrafilaturaExtractor(fetch_client)
 
     # generate_theme_queries takes no None router (mlsc.pipeline.themes) —
     # unlike run_override's stage_rerun tolerance for the same condition, an
